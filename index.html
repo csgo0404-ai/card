@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>우리반 - 카드 모음집</title>
+    <link href="https://fonts.googleapis.com/css2?family=Dongle:wght@400;700&family=Jua&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+
+    <style>
+        :root { 
+            --wood-dark: #4e342e;
+            --wood-bg: #6d4c41;
+            --wood-shelf: #3e2723;
+            --bg-cream: #f4ece1;
+        }
+        
+        /* 📜 스크롤바 디자인 */
+        ::-webkit-scrollbar { width: 14px; }
+        ::-webkit-scrollbar-track { background: var(--bg-cream); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: #a1887f; border-radius: 10px; border: 3px solid var(--bg-cream); }
+        ::-webkit-scrollbar-thumb:hover { background: #795548; }
+
+        body { 
+            font-family: 'Jua', sans-serif; background-color: #a89d8f; 
+            margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; 
+            min-height: 100vh; overflow-x: hidden;
+            opacity: 0; transition: opacity 0.5s ease-in; /* 투명하게 시작 */
+        }
+        body.fonts-loaded { opacity: 1; } /* 폰트 로딩 완료 시 나타남 */
+        
+        /* 🌟 창 크기를 5열(300px 카드 5장)에 맞춰 대폭 확대 */
+        .app-container { background-color: var(--bg-cream); border-radius: 25px; border: 10px solid var(--wood-dark); box-shadow: 0 20px 40px rgba(0,0,0,0.4); width: 100%; max-width: 1750px; padding: 35px; position: relative; }
+        
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 4px solid var(--wood-dark); padding-bottom: 15px; }
+        
+        .title-wrap { display: flex; align-items: center; justify-content: center; flex-grow: 1; position: relative; }
+        h1 { margin: 0; font-size: 2.8rem; color: var(--wood-dark); text-align: center; text-shadow: 2px 2px 0 rgba(0,0,0,0.1); }
+        
+        .hidden { display: none !important; }
+        
+        /* 공통 버튼 스타일 */
+        .icon-btn, .action-btn, .btn-draw-all { 
+            background-color: #8d6e63; color: white; border: none; padding: 10px 25px; font-size: 1.3rem; border-radius: 25px; cursor: pointer; font-family: 'Jua', sans-serif; transition: 0.2s; box-shadow: 0 4px 0 #5d4037; 
+        }
+        .icon-btn:active, .action-btn:active, .btn-draw-all:active { transform: translateY(4px); box-shadow: none; }
+        
+        /* 우측 상단 '전체' 버튼 */
+        .btn-draw-all-top { position: absolute; right: 20px; }
+
+        /* ⚙️ 설정 버튼 (톱니바퀴) */
+        .setting-btn { 
+            background: transparent; border: none; font-size: 2.5rem; cursor: pointer; transition: transform 0.2s; padding: 0; margin-left: 15px;
+        }
+        .setting-btn:hover { transform: rotate(45deg) scale(1.1); }
+
+        /* 📚 가로 5열 우드 진열대 스타일 */
+        .grid-container { 
+            display: grid; 
+            grid-template-columns: repeat(5, 1fr); 
+            gap: 0 25px; 
+            background-color: var(--wood-bg);
+            background-image: repeating-linear-gradient(to bottom, transparent, transparent 180px, var(--wood-shelf) 180px, var(--wood-shelf) 200px);
+            border-radius: 15px; border: 8px solid var(--wood-dark);
+            box-shadow: inset 0 10px 20px rgba(0,0,0,0.5);
+            grid-auto-rows: 200px; 
+            align-items: end; padding: 0 40px; min-height: 400px;
+        }
+        
+        /* 📖 로비: 베이지톤 책 모양 (Dongle체 적용) */
+        .card-category { 
+            height: 130px; width: 100%; max-width: 220px; 
+            margin: 0 auto 20px auto; 
+            background: linear-gradient(135deg, #fff3e0, #f5e6d3); 
+            border-left: 18px solid #8d6e63; 
+            border-radius: 6px 15px 15px 6px; color: #4e342e; 
+            font-size: 2.6rem; 
+            cursor: pointer; 
+            display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+            box-shadow: inset -5px 0 10px rgba(0,0,0,0.05), 5px 5px 8px rgba(0,0,0,0.4); 
+            transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1); padding: 8px 15px; position: relative;
+            font-family: 'Dongle', sans-serif; font-weight: 700; line-height: 1.0; word-break: keep-all;
+            transform-origin: bottom center; will-change: transform; z-index: 2;
+        }
+        
+        /* 📌 길어진 갈색 인덱스 */
+        .card-category::before {
+            content: ''; position: absolute; top: -10px; right: 25px; 
+            width: 22px; height: 38px;
+            background-color: #5d4037; border-radius: 4px 4px 2px 2px;
+            box-shadow: inset -2px 0 4px rgba(0,0,0,0.2), 2px 2px 5px rgba(0,0,0,0.3);
+            z-index: -1; 
+        }
+        
+        .card-category::after {
+            content: ''; position: absolute; right: 0; top: 6px; bottom: 6px; width: 6px;
+            background: rgba(255,255,255,0.9); border-radius: 0 10px 10px 0;
+        }
+        .card-category:hover { 
+            transform: scale(1.05) translateY(-6px) rotate(-1deg); 
+            box-shadow: inset -5px 0 10px rgba(0,0,0,0.05), 10px 15px 20px rgba(0,0,0,0.6); 
+            z-index: 5;
+        }
+
+        /* 뽑기 화면 컨트롤 */
+        .controls-wrapper { display: flex; justify-content: center; margin-bottom: 25px; }
+        .controls { background: var(--wood-dark); padding: 15px 30px; border-radius: 40px; display: inline-flex; align-items: center; gap: 15px; z-index: 100; position: relative; color: white;}
+        .controls input { font-size: 1.6rem; width: 80px; text-align: center; border: 3px solid #8d6e63; border-radius: 15px; padding: 8px; font-family: 'Jua', sans-serif; color: var(--wood-dark); }
+        .controls label { font-size: 1.3rem; }
+
+        /* 🃏 결과 영역 (5열 배치 최적화) */
+        .result-grid { 
+            display: flex; flex-wrap: wrap; justify-content: center; align-items: center; 
+            gap: 30px; perspective: 1500px; padding-top: 10px; min-height: 550px; max-width: 1700px; margin: 0 auto;
+        }
+        
+        @keyframes flipAppear {
+            0% { opacity: 0; transform: rotateY(-180deg) scale(0.5); }
+            100% { opacity: 1; transform: rotateY(0deg) scale(1); }
+        }
+        
+        /* 🌟 세로형 카드 1.5배 확대 */
+        .flip-container { 
+            width: 300px; height: 420px; cursor: default; opacity: 0; 
+            animation: flipAppear 0.5s ease-out forwards; 
+            will-change: transform, opacity; transform: translateZ(0); 
+        }
+        .flip-container.horizontal { width: 420px; height: 300px; }
+
+        /* 전부 펼치기 모드 (축소) */
+        .result-grid.draw-all-mode .flip-container { width: 160px; height: 224px; }
+        .result-grid.draw-all-mode .flip-container.horizontal { width: 224px; height: 160px; }
+        
+        .flipper { width: 100%; height: 100%; position: relative; transition: transform 0.5s ease; transform-style: preserve-3d; will-change: transform; }
+        .flip-container:hover .flipper { transform: scale(1.05); } 
+        
+        .can-flip { cursor: pointer !important; }
+        .flip-container.is-flipped .flipper { transform: rotateY(180deg); }
+        .flip-container.is-flipped:hover .flipper { transform: rotateY(180deg) scale(1.05); }
+
+        .card-front, .card-back { 
+            width: 100%; height: 100%; position: absolute; top: 0; left: 0; 
+            backface-visibility: hidden; border-radius: 20px; box-shadow: 0 10px 20px rgba(0,0,0,0.2); 
+            object-fit: contain; background-color: white; padding: 10px; box-sizing: border-box; 
+        }
+        .card-back { transform: rotateY(180deg); }
+
+        /* 🃏 귀여운 마시멜로 '?' 카드 디자인 */
+        .placeholder-card { animation: none; opacity: 1; }
+        .placeholder-card .card-front {
+            background: #FFF8E1; /* 따뜻한 베이지색 배경 */
+            border: 10px solid #4E342E; /* 진한 갈색 테두리 */
+            display: flex; flex-direction: column; justify-content: center; align-items: center; 
+            border-radius: 20px; position: relative;
+            box-shadow: inset 0 0 15px rgba(0,0,0,0.05), 8px 10px 20px rgba(0,0,0,0.3); 
+        }
+        
+        /* 안쪽 점선 테두리로 카드 느낌 뿜뿜 */
+        .placeholder-card .card-front::before {
+            content: ''; position: absolute; top: 8px; left: 8px; right: 8px; bottom: 8px;
+            border: 3px dashed rgba(78, 52, 46, 0.3); border-radius: 10px; pointer-events: none;
+        }
+        
+        /* 마시멜로처럼 통통한 폰트의 물음표 */
+        .placeholder-card .card-front .q-mark { 
+            font-size: 15rem; 
+            color: #4E342E; 
+            font-family: 'Dongle', sans-serif;
+            text-shadow: 4px 4px 0px rgba(0,0,0,0.1); 
+            z-index: 1;
+            margin: 0;
+            line-height: 0.5; /* 상하 여백 조절 */
+        }
+
+        /* 👩‍🏫 교사용 설정 (우드톤) */
+        #teacherView { background-color: #5d4037; color: #fffaf0; padding: 30px; border-radius: 30px; text-align: left; }
+        .add-card-box { display: flex; gap: 10px; margin-bottom: 25px; flex-wrap: wrap; align-items: center; }
+        .add-card-box input, .add-card-box select { padding: 12px; border-radius: 12px; border: none; font-family: 'Jua', sans-serif; font-size: 1.1rem; color: #4e342e; }
+        .add-card-box input[type="text"] { flex: 2; min-width: 120px; }
+        .add-card-box input[type="number"] { flex: 1; min-width: 80px; }
+        .add-card-box select { flex: 1; min-width: 100px; cursor: pointer; }
+        
+        .table-container { border-radius: 15px; overflow: hidden; background: #4e342e; }
+        .teacher-table { width: 100%; border-collapse: collapse; color: white; font-family: 'Malgun Gothic', sans-serif;}
+        .teacher-table th { background-color: #3e2723; padding: 15px; text-align: center; }
+        .teacher-table td { padding: 12px; border-bottom: 1px solid #6d4c41; text-align: center; font-size: 1rem; }
+        .drag-handle { cursor: grab; font-size: 1.2rem; color: #bcaaa4; padding: 0 10px; }
+        .delete-btn { background-color: #ef5350; border: none; color: white; padding: 7px 15px; border-radius: 10px; cursor: pointer; font-family: 'Jua', sans-serif; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <button id="backBtn" class="icon-btn hidden">◀ 서재로</button>
+            <div class="title-wrap">
+                <h1 id="mainTitle">카드 모음집</h1>
+                <button id="drawAllBtn" class="btn-draw-all-top btn-draw-all hidden">전체</button>
+            </div>
+            <button id="goTeacherBtn" class="setting-btn" title="카드 설정">⚙️</button>
+        </header>
+
+        <main>
+            <section id="studentLobby">
+                <div id="cardGrid" class="grid-container"></div>
+            </section>
+
+            <section id="drawView" class="hidden">
+                <div class="controls-wrapper">
+                    <div class="controls">
+                        <label>찾을 장수:</label>
+                        <input type="number" id="drawCount" value="1" min="1">
+                        <button id="drawBtn" class="action-btn">뽑기</button>
+                    </div>
+                </div>
+                <div id="resultArea" class="result-grid"></div>
+            </section>
+
+            <section id="teacherView" class="hidden">
+                <h2 style="font-family:'Jua'; margin-top:0;">카드 설정</h2>
+                <div class="add-card-box">
+                    <input type="text" id="newCardName" placeholder="표시 이름 (예: 도란도란)">
+                    <input type="text" id="newCardFolder" placeholder="폴더명">
+                    <select id="newCardOrientation">
+                        <option value="vertical">세로형 ↕</option>
+                        <option value="horizontal">가로형 ↔</option>
+                    </select>
+                    <input type="number" id="newCardTotal" placeholder="장수">
+                    <button id="addCardBtn" class="action-btn" style="font-size:1rem; padding:10px 20px;">저장</button>
+                    <button id="cancelEditBtn" class="icon-btn hidden" style="background:#666;">취소</button>
+                </div>
+                <div class="table-container">
+                    <table class="teacher-table">
+                        <thead>
+                            <tr><th style="width: 50px;">순서</th><th>표시 이름</th><th>폴더명</th><th>형태</th><th>장수</th><th>관리</th></tr>
+                        </thead>
+                        <tbody id="cardManageList"></tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+// 폰트가 모두 다운로드되면 화면을 부드럽게 띄움
+        document.fonts.ready.then(() => document.body.classList.add('fonts-loaded'));
+        // --- 1. Firebase 설정 ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyAnVsQlFox_s9r0JBiTyXgzchCqY-WSrR0",
+            authDomain: "class-store-58db1.firebaseapp.com",
+            databaseURL: "https://class-store-58db1-default-rtdb.firebaseio.com",
+            projectId: "class-store-58db1",
+            storageBucket: "class-store-58db1.firebasestorage.app",
+            messagingSenderId: "668700911156",
+            appId: "1:668700911156:web:c7dde1466a104cf41d4c61"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const cardsRef = db.ref('cookieClass/randomCards');
+
+        // 🎵 2. 효과음 (웹 오디오 API)
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+
+        function initAudio() {
+            if (!audioCtx) audioCtx = new AudioContext();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function playSimultaneousDrawSound() {
+            initAudio();
+            const now = audioCtx.currentTime;
+            const freqs = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98]; 
+            freqs.forEach((freq, index) => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, now + (index * 0.05));
+                gain.gain.setValueAtTime(0, now + (index * 0.05));
+                gain.gain.linearRampToValueAtTime(0.15, now + (index * 0.05) + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + (index * 0.05) + 0.8);
+                osc.start(now + (index * 0.05));
+                osc.stop(now + (index * 0.05) + 0.8);
+            });
+        }
+
+        function playFlipSound() {
+            initAudio();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.type = 'triangle'; 
+            osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(2200, audioCtx.currentTime + 0.1); 
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+        }
+
+        let cardSettings = [];
+        let editingId = null;
+        let currentCard = null;
+        let isDrawAllClicked = false; 
+
+        const mainTitle = document.getElementById('mainTitle');
+        const cardGrid = document.getElementById('cardGrid');
+        const cardManageList = document.getElementById('cardManageList');
+        const resultArea = document.getElementById('resultArea');
+        const drawCountInput = document.getElementById('drawCount');
+
+        // --- 3. 캐시 및 데이터 동기화 ---
+        const cachedCards = localStorage.getItem('cookieClassCachedCards');
+        if (cachedCards) {
+            cardSettings = JSON.parse(cachedCards);
+            renderLobby();
+        }
+
+        cardsRef.on('value', (snap) => {
+            const data = snap.val();
+            cardSettings = data ? Object.keys(data).map(k => ({ id: k, ...data[k] })) : [];
+            cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
+            localStorage.setItem('cookieClassCachedCards', JSON.stringify(cardSettings));
+            renderLobby();
+            renderTable();
+        });
+
+        function renderLobby() {
+            cardGrid.innerHTML = cardSettings.map((c) => {
+                return `<div class="card-category" onclick="startDraw('${c.id}')">${c.name}</div>`;
+            }).join('');
+        }
+
+        function renderTable() {
+            cardManageList.innerHTML = cardSettings.map((c) => `
+                <tr data-id="${c.id}" onclick="startEdit('${c.id}')">
+                    <td class="drag-handle">☰</td>
+                    <td>${c.name}</td><td>${c.folder}</td>
+                    <td><span style="background:#8d6e63; padding:3px 8px; border-radius:10px; font-size:0.9rem;">${c.orientation === 'horizontal' ? '가로 ↔' : '세로 ↕'}</span></td>
+                    <td>${c.totalImages}장</td>
+                    <td><button class="delete-btn" onclick="event.stopPropagation(); deleteCard('${c.id}')">삭제</button></td>
+                </tr>
+            `).join('');
+            new Sortable(cardManageList, { handle: '.drag-handle', animation: 150, onEnd: saveNewOrder });
+        }
+
+        function saveNewOrder() {
+            const updates = {};
+            cardManageList.querySelectorAll('tr').forEach((row, index) => { updates[`${row.getAttribute('data-id')}/order`] = index; });
+            cardsRef.update(updates);
+        }
+
+        function toggleView(viewId) {
+            ['studentLobby', 'drawView', 'teacherView'].forEach(id => document.getElementById(id).classList.add('hidden'));
+            document.getElementById(viewId).classList.remove('hidden');
+            
+            document.getElementById('backBtn').classList.toggle('hidden', viewId === 'studentLobby');
+            document.getElementById('goTeacherBtn').classList.toggle('hidden', viewId !== 'studentLobby');
+            document.getElementById('drawAllBtn').classList.toggle('hidden', viewId !== 'drawView');
+        }
+
+        // --- 4. 대기 화면 설정 및 강력한 Preload ---
+        function startDraw(id) {
+            currentCard = cardSettings.find(c => c.id === id);
+            mainTitle.textContent = currentCard.name;
+            drawCountInput.value = 1; 
+            drawCountInput.max = currentCard.totalImages; 
+            
+            toggleView('drawView');
+            updatePlaceholders(); 
+            
+            // 🔥 마법: 덱을 선택하자마자 이미지를 미리 몰래 다운로드합니다!
+            preloadImages(currentCard); 
+        }
+
+        // 브라우저 렉 방지용 강력한 이미지 미리 불러오기 함수
+        function preloadImages(card) {
+            const folderEncoded = encodeURIComponent(card.folder);
+            
+            // 화면에 보이지 않는 임시 공간 생성
+            let hiddenDiv = document.getElementById('hidden-preload-area');
+            if(!hiddenDiv) {
+                hiddenDiv = document.createElement('div');
+                hiddenDiv.id = 'hidden-preload-area';
+                hiddenDiv.style.display = 'none'; // 완벽히 숨김
+                document.body.appendChild(hiddenDiv);
+            }
+            hiddenDiv.innerHTML = ''; // 이전 캐시 비우기
+
+            for(let i = 1; i <= card.totalImages; i++) {
+                const img1 = new Image();
+                img1.src = `./${folderEncoded}/%20(${i}).webp`;
+                img1.decoding = "async"; // 비동기 처리
+                hiddenDiv.appendChild(img1);
+
+                const img2 = new Image();
+                img2.src = `./${folderEncoded}/(${i}).webp`;
+                img2.decoding = "async";
+                hiddenDiv.appendChild(img2);
+            }
+        }
+
+        drawCountInput.addEventListener('input', updatePlaceholders);
+
+        function updatePlaceholders() {
+            if(!currentCard) return;
+            let count = parseInt(drawCountInput.value);
+            if(isNaN(count) || count < 1) count = 1;
+            if(count > currentCard.totalImages) count = currentCard.totalImages;
+
+            resultArea.innerHTML = '';
+            if(count > 10) resultArea.classList.add('draw-all-mode');
+            else resultArea.classList.remove('draw-all-mode');
+
+            const isHorizontal = currentCard.orientation === 'horizontal';
+
+            for(let i=0; i<count; i++) {
+                const container = document.createElement('div');
+                container.className = `flip-container placeholder-card ${isHorizontal ? 'horizontal' : ''}`;
+                container.innerHTML = `
+                    <div class="flipper">
+                        <div class="card-front">
+                            <span class="q-mark">?</span>
+                        </div>
+                    </div>
+                `;
+                resultArea.appendChild(container);
+            }
+        }
+
+        // 🔒 비밀번호 설정 (csgo10)
+        document.getElementById('goTeacherBtn').onclick = () => { 
+            const pw = prompt("비밀번호를 입력하세요.");
+            if (pw !== "csgo10") {
+                alert("비밀번호가 일치하지 않습니다.");
+                return;
+            }
+            toggleView('teacherView'); 
+            mainTitle.textContent = "카드 설정"; 
+        };
+        document.getElementById('backBtn').onclick = () => { toggleView('studentLobby'); mainTitle.textContent = "카드 모음집"; resetForm(); };
+
+        document.getElementById('addCardBtn').onclick = () => {
+            const name = document.getElementById('newCardName').value.trim();
+            const folder = document.getElementById('newCardFolder').value.trim();
+            const orientation = document.getElementById('newCardOrientation').value;
+            const total = document.getElementById('newCardTotal').value;
+            if(!name || !folder || !total) return alert("내용을 모두 채워주세요!");
+            const payload = { name, folder, orientation, totalImages: parseInt(total) };
+            if(editingId) db.ref('cookieClass/randomCards/' + editingId).update(payload);
+            else { payload.order = cardSettings.length; cardsRef.push(payload); }
+            resetForm();
+        };
+
+        function startEdit(id) {
+            const c = cardSettings.find(card => card.id === id);
+            editingId = id;
+            document.getElementById('newCardName').value = c.name;
+            document.getElementById('newCardFolder').value = c.folder;
+            document.getElementById('newCardOrientation').value = c.orientation || 'vertical';
+            document.getElementById('newCardTotal').value = c.totalImages;
+            document.getElementById('addCardBtn').textContent = "수정하기";
+            document.getElementById('cancelEditBtn').classList.remove('hidden');
+        }
+
+        function resetForm() {
+            editingId = null;
+            ['newCardName', 'newCardFolder', 'newCardTotal'].forEach(id => document.getElementById(id).value = '');
+            document.getElementById('newCardOrientation').value = 'vertical';
+            document.getElementById('addCardBtn').textContent = "저장하기";
+            document.getElementById('cancelEditBtn').classList.add('hidden');
+        }
+
+        window.deleteCard = (id) => { if(confirm("삭제할까요?")) db.ref('cookieClass/randomCards/' + id).remove(); };
+
+        // --- '전체' 버튼 ---
+        document.getElementById('drawAllBtn').onclick = () => {
+            if(!currentCard) return;
+            drawCountInput.value = currentCard.totalImages;
+            
+            // 🔥 전체 버튼을 눌렀다는 플래그를 저장합니다 (애니메이션 딜레이 조절용)
+            isDrawAllClicked = true;
+            document.getElementById('drawBtn').click();
+        };
+
+        // --- 5. 🃏 렉 없는 동시 애니메이션 (시간차 부여 & Async 적용) ---
+        document.getElementById('drawBtn').onclick = () => {
+            let count = parseInt(drawCountInput.value);
+            const total = currentCard.totalImages;
+            const isHorizontal = currentCard.orientation === 'horizontal';
+            
+            // 딜레이를 계산하기 위해 전체 뽑기 상태를 저장해둡니다.
+            const wasDrawAll = isDrawAllClicked;
+
+            if(isDrawAllClicked || count > 10) resultArea.classList.add('draw-all-mode');
+            else resultArea.classList.remove('draw-all-mode');
+            isDrawAllClicked = false; 
+            
+            initAudio();
+            playSimultaneousDrawSound();
+
+            let nums = Array.from({length: total}, (_, i) => i + 1);
+            for (let i = nums.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [nums[i], nums[j]] = [nums[j], nums[i]];
+            }
+            if(count > total) count = total;
+            nums = nums.slice(0, count);
+            
+            resultArea.innerHTML = '';
+            const folderEncoded = encodeURIComponent(currentCard.folder);
+            
+            const fragment = document.createDocumentFragment();
+
+            nums.forEach((n, index) => {
+                const container = document.createElement('div');
+                container.className = 'flip-container' + (isHorizontal ? ' horizontal' : '');
+                
+                // 🔥 브라우저 렉 방지: 전체 뽑기일 때는 0.04초, 조금 뽑을 때는 0.02초의 미세한 간격을 줍니다.
+                const delayTime = wasDrawAll ? 0.04 : 0.02;
+                container.style.animationDelay = `${index * delayTime}s`;
+
+                const frontSpaced = `./${folderEncoded}/%20(${n}).webp`;
+                const frontNormal = `./${folderEncoded}/(${n}).webp`;
+                const backSpaced = `./${folderEncoded}/뒷면%20(${n}).webp`;
+                const backNormal = `./${folderEncoded}/뒷면(${n}).webp`;
+
+                // 🔥 Async 적용: 이미지를 그릴 때 브라우저가 멈추지 않도록 합니다.
+                container.innerHTML = `
+                    <div class="flipper">
+                        <img src="${frontSpaced}" class="card-front" decoding="async"
+                             onerror="this.onerror=null; this.src='${frontNormal}';">
+                        <img src="${backSpaced}" class="card-back" id="backImg_${n}" decoding="async"
+                             onerror="this.onerror=null; this.src='${backNormal}';">
+                    </div>
+                `;
+
+                const checkBackImg = new Image();
+                checkBackImg.onload = () => {
+                    container.classList.add('can-flip');
+                    container.onclick = () => { playFlipSound(); container.classList.toggle('is-flipped'); };
+                };
+                checkBackImg.onerror = () => {
+                    const checkFallback = new Image();
+                    checkFallback.onload = () => {
+                        container.classList.add('can-flip');
+                        container.onclick = () => { playFlipSound(); container.classList.toggle('is-flipped'); };
+                    };
+                    checkFallback.onerror = () => {
+                        const backImgElement = document.getElementById(`backImg_${n}`);
+                        if(backImgElement) backImgElement.style.display = 'none';
+                    };
+                    checkFallback.src = backNormal;
+                };
+                checkBackImg.src = backSpaced;
+                fragment.appendChild(container);
+            });
+            
+            resultArea.appendChild(fragment);
+        };
+    </script>
+</body>
+</html>
