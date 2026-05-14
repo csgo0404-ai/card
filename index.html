@@ -323,11 +323,16 @@
 
         if (cachedCards) {
             cardSettings = JSON.parse(cachedCards);
+            cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
             renderLobby();
+            renderTable();
         }
 
         async function reloadCards(force = false) {
-            if (!force && cacheIsFresh) return; // 5분 내면 네트워크 요청 생략
+            if (!force && cacheIsFresh) {
+                renderTable();
+                return;
+            }
             const arr = await fetchCards();
             cardSettings = Array.isArray(arr) ? arr : [];
             cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -567,25 +572,36 @@
                 container.style.animationDelay = `${index * delayTime}s`;
 
                 const frontUrl = buildFrontUrl(currentCard.folder, n, pattern);
-                const backUrl = buildBackUrl(currentCard.folder, n, pattern);
+                const folderEnc = encodeURIComponent(currentCard.folder);
+                const backSpaced = `./${folderEnc}/뒷면%20(${n}).webp`;
+                const backNormal = `./${folderEnc}/뒷면(${n}).webp`;
+                const backPrimary = pattern === 'spaced' ? backSpaced : backNormal;
+                const backFallback = pattern === 'spaced' ? backNormal : backSpaced;
 
                 container.innerHTML = `
                     <div class="flipper">
                         <img src="${frontUrl}" class="card-front" decoding="async" fetchpriority="high">
-                        <img src="${backUrl}" class="card-back" id="backImg_${n}" decoding="async">
+                        <img src="${backPrimary}" class="card-back" id="backImg_${n}" decoding="async"
+                             onerror="this.onerror=null; this.src='${backFallback}';">
                     </div>
                 `;
 
-                const checkBackImg = new Image();
-                checkBackImg.onload = () => {
+                const enableFlip = () => {
                     container.classList.add('can-flip');
                     container.onclick = () => { playFlipSound(); container.classList.toggle('is-flipped'); };
                 };
-                checkBackImg.onerror = () => {
-                    const backImgElement = document.getElementById(`backImg_${n}`);
-                    if(backImgElement) backImgElement.style.display = 'none';
+                const checkPrimary = new Image();
+                checkPrimary.onload = enableFlip;
+                checkPrimary.onerror = () => {
+                    const checkFallback = new Image();
+                    checkFallback.onload = enableFlip;
+                    checkFallback.onerror = () => {
+                        const el = document.getElementById(`backImg_${n}`);
+                        if(el) el.style.display = 'none';
+                    };
+                    checkFallback.src = backFallback;
                 };
-                checkBackImg.src = backUrl;
+                checkPrimary.src = backPrimary;
                 fragment.appendChild(container);
             });
 
