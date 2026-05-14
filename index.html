@@ -399,12 +399,12 @@
 
             for(let i = 1; i <= card.totalImages; i++) {
                 const img1 = new Image();
-                img1.src = `./${folderEncoded}/%20(${i}).jpg`;
+                img1.src = `./${folderEncoded}/%20(${i}).webp`;
                 img1.decoding = "async"; // 비동기 처리
                 hiddenDiv.appendChild(img1);
 
                 const img2 = new Image();
-                img2.src = `./${folderEncoded}/(${i}).jpg`;
+                img2.src = `./${folderEncoded}/(${i}).webp`;
                 img2.decoding = "async";
                 hiddenDiv.appendChild(img2);
             }
@@ -542,10 +542,10 @@
                 const delayTime = wasDrawAll ? 0.04 : 0.02;
                 container.style.animationDelay = `${index * delayTime}s`;
 
-                const frontSpaced = `./${folderEncoded}/%20(${n}).jpg`;
-                const frontNormal = `./${folderEncoded}/(${n}).jpg`;
-                const backSpaced = `./${folderEncoded}/뒷면%20(${n}).jpg`;
-                const backNormal = `./${folderEncoded}/뒷면(${n}).jpg`;
+                const frontSpaced = `./${folderEncoded}/%20(${n}).webp`;
+                const frontNormal = `./${folderEncoded}/(${n}).webp`;
+                const backSpaced = `./${folderEncoded}/뒷면%20(${n}).webp`;
+                const backNormal = `./${folderEncoded}/뒷면(${n}).webp`;
 
                 // 🔥 Async 적용: 이미지를 그릴 때 브라우저가 멈추지 않도록 합니다.
                 container.innerHTML = `
