@@ -259,9 +259,11 @@
                 body: JSON.stringify(arr)
             });
             if (!r.ok) { alert('저장 실패: ' + r.status); throw new Error('save failed'); }
-            // 저장 성공 시 로컬 캐시도 즉시 갱신 (서버 캐시 race 방지)
+            // 저장 성공 시 로컬 캐시 갱신 + 화면도 즉시 다시 그림
+            cardSettings = arr;
             localStorage.setItem('cookieClassCachedCards', JSON.stringify(arr));
-            localStorage.setItem('cookieClassCachedAt', String(Date.now()));
+            renderLobby();
+            renderTable();
         }
         function newId() {
             return (crypto.randomUUID ? crypto.randomUUID() : 'c' + Date.now() + Math.random().toString(36).slice(2,8));
