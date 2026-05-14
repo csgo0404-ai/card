@@ -6,8 +6,6 @@
     <title>우리반 - 카드 모음집</title>
     <link href="https://fonts.googleapis.com/css2?family=Dongle:wght@400;700&family=Jua&display=swap" rel="stylesheet">
     
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
     <style>
@@ -246,19 +244,25 @@
     <script>
 // 폰트가 모두 다운로드되면 화면을 부드럽게 띄움
         document.fonts.ready.then(() => document.body.classList.add('fonts-loaded'));
-        // --- 1. Firebase 설정 ---
-        const firebaseConfig = {
-            apiKey: "AIzaSyAnVsQlFox_s9r0JBiTyXgzchCqY-WSrR0",
-            authDomain: "class-store-58db1.firebaseapp.com",
-            databaseURL: "https://class-store-58db1-default-rtdb.firebaseio.com",
-            projectId: "class-store-58db1",
-            storageBucket: "class-store-58db1.firebasestorage.app",
-            messagingSenderId: "668700911156",
-            appId: "1:668700911156:web:c7dde1466a104cf41d4c61"
-        };
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.database();
-        const cardsRef = db.ref('cookieClass/randomCards');
+        // --- 1. Cloudflare KV API ---
+        const API = '/api/cards';
+        let adminPw = '';
+
+        async function fetchCards() {
+            const r = await fetch(API, { cache: 'no-store' });
+            return r.ok ? r.json() : [];
+        }
+        async function saveCards(arr) {
+            const r = await fetch(API, {
+                method: 'PUT',
+                headers: { 'content-type': 'application/json', 'x-auth': adminPw },
+                body: JSON.stringify(arr)
+            });
+            if (!r.ok) { alert('저장 실패: ' + r.status); throw new Error('save failed'); }
+        }
+        function newId() {
+            return (crypto.randomUUID ? crypto.randomUUID() : 'c' + Date.now() + Math.random().toString(36).slice(2,8));
+        }
 
         // 🎵 2. 효과음 (웹 오디오 API)
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -318,14 +322,15 @@
             renderLobby();
         }
 
-        cardsRef.on('value', (snap) => {
-            const data = snap.val();
-            cardSettings = data ? Object.keys(data).map(k => ({ id: k, ...data[k] })) : [];
+        async function reloadCards() {
+            const arr = await fetchCards();
+            cardSettings = Array.isArray(arr) ? arr : [];
             cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
             localStorage.setItem('cookieClassCachedCards', JSON.stringify(cardSettings));
             renderLobby();
             renderTable();
-        });
+        }
+        reloadCards();
 
         function renderLobby() {
             cardGrid.innerHTML = cardSettings.map((c) => {
@@ -346,10 +351,13 @@
             new Sortable(cardManageList, { handle: '.drag-handle', animation: 150, onEnd: saveNewOrder });
         }
 
-        function saveNewOrder() {
-            const updates = {};
-            cardManageList.querySelectorAll('tr').forEach((row, index) => { updates[`${row.getAttribute('data-id')}/order`] = index; });
-            cardsRef.update(updates);
+        async function saveNewOrder() {
+            const rows = [...cardManageList.querySelectorAll('tr')];
+            const idOrder = new Map(rows.map((row, index) => [row.getAttribute('data-id'), index]));
+            cardSettings.forEach(c => { if (idOrder.has(c.id)) c.order = idOrder.get(c.id); });
+            cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
+            await saveCards(cardSettings);
+            await reloadCards();
         }
 
         function toggleView(viewId) {
@@ -391,12 +399,12 @@
 
             for(let i = 1; i <= card.totalImages; i++) {
                 const img1 = new Image();
-                img1.src = `./${folderEncoded}/%20(${i}).webp`;
+                img1.src = `./${folderEncoded}/%20(${i}).jpg`;
                 img1.decoding = "async"; // 비동기 처리
                 hiddenDiv.appendChild(img1);
 
                 const img2 = new Image();
-                img2.src = `./${folderEncoded}/(${i}).webp`;
+                img2.src = `./${folderEncoded}/(${i}).jpg`;
                 img2.decoding = "async";
                 hiddenDiv.appendChild(img2);
             }
@@ -431,26 +439,33 @@
         }
 
         // 🔒 비밀번호 설정 (csgo10)
-        document.getElementById('goTeacherBtn').onclick = () => { 
+        document.getElementById('goTeacherBtn').onclick = () => {
             const pw = prompt("비밀번호를 입력하세요.");
             if (pw !== "csgo10") {
                 alert("비밀번호가 일치하지 않습니다.");
                 return;
             }
-            toggleView('teacherView'); 
-            mainTitle.textContent = "카드 설정"; 
+            adminPw = pw;
+            toggleView('teacherView');
+            mainTitle.textContent = "카드 설정";
         };
         document.getElementById('backBtn').onclick = () => { toggleView('studentLobby'); mainTitle.textContent = "카드 모음집"; resetForm(); };
 
-        document.getElementById('addCardBtn').onclick = () => {
+        document.getElementById('addCardBtn').onclick = async () => {
             const name = document.getElementById('newCardName').value.trim();
             const folder = document.getElementById('newCardFolder').value.trim();
             const orientation = document.getElementById('newCardOrientation').value;
             const total = document.getElementById('newCardTotal').value;
             if(!name || !folder || !total) return alert("내용을 모두 채워주세요!");
             const payload = { name, folder, orientation, totalImages: parseInt(total) };
-            if(editingId) db.ref('cookieClass/randomCards/' + editingId).update(payload);
-            else { payload.order = cardSettings.length; cardsRef.push(payload); }
+            if(editingId) {
+                const idx = cardSettings.findIndex(c => c.id === editingId);
+                if(idx >= 0) cardSettings[idx] = { ...cardSettings[idx], ...payload };
+            } else {
+                cardSettings.push({ id: newId(), order: cardSettings.length, ...payload });
+            }
+            await saveCards(cardSettings);
+            await reloadCards();
             resetForm();
         };
 
@@ -473,7 +488,12 @@
             document.getElementById('cancelEditBtn').classList.add('hidden');
         }
 
-        window.deleteCard = (id) => { if(confirm("삭제할까요?")) db.ref('cookieClass/randomCards/' + id).remove(); };
+        window.deleteCard = async (id) => {
+            if(!confirm("삭제할까요?")) return;
+            cardSettings = cardSettings.filter(c => c.id !== id);
+            await saveCards(cardSettings);
+            await reloadCards();
+        };
 
         // --- '전체' 버튼 ---
         document.getElementById('drawAllBtn').onclick = () => {
@@ -522,10 +542,10 @@
                 const delayTime = wasDrawAll ? 0.04 : 0.02;
                 container.style.animationDelay = `${index * delayTime}s`;
 
-                const frontSpaced = `./${folderEncoded}/%20(${n}).webp`;
-                const frontNormal = `./${folderEncoded}/(${n}).webp`;
-                const backSpaced = `./${folderEncoded}/뒷면%20(${n}).webp`;
-                const backNormal = `./${folderEncoded}/뒷면(${n}).webp`;
+                const frontSpaced = `./${folderEncoded}/%20(${n}).jpg`;
+                const frontNormal = `./${folderEncoded}/(${n}).jpg`;
+                const backSpaced = `./${folderEncoded}/뒷면%20(${n}).jpg`;
+                const backNormal = `./${folderEncoded}/뒷면(${n}).jpg`;
 
                 // 🔥 Async 적용: 이미지를 그릴 때 브라우저가 멈추지 않도록 합니다.
                 container.innerHTML = `
