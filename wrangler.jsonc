@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "card",
+  "main": "worker.js",
+  "compatibility_date": "2026-05-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "CARDS",
+      "id": "0efacda9a5bd45f9838c01aeca965244"
+    }
+  ],
+  "vars": {
+    "ADMIN_PW": "csgo10"
+  }
+}
