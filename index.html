@@ -249,7 +249,7 @@
         let adminPw = '';
 
         async function fetchCards() {
-            const r = await fetch(API, { cache: 'no-store' });
+            const r = await fetch(API);
             return r.ok ? r.json() : [];
         }
         async function saveCards(arr) {
@@ -316,17 +316,23 @@
         const drawCountInput = document.getElementById('drawCount');
 
         // --- 3. 캐시 및 데이터 동기화 ---
+        const CACHE_TTL_MS = 5 * 60 * 1000; // 5분
         const cachedCards = localStorage.getItem('cookieClassCachedCards');
+        const cachedAt = parseInt(localStorage.getItem('cookieClassCachedAt') || '0', 10);
+        const cacheIsFresh = cachedCards && (Date.now() - cachedAt) < CACHE_TTL_MS;
+
         if (cachedCards) {
             cardSettings = JSON.parse(cachedCards);
             renderLobby();
         }
 
-        async function reloadCards() {
+        async function reloadCards(force = false) {
+            if (!force && cacheIsFresh) return; // 5분 내면 네트워크 요청 생략
             const arr = await fetchCards();
             cardSettings = Array.isArray(arr) ? arr : [];
             cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
             localStorage.setItem('cookieClassCachedCards', JSON.stringify(cardSettings));
+            localStorage.setItem('cookieClassCachedAt', String(Date.now()));
             renderLobby();
             renderTable();
         }
@@ -357,7 +363,7 @@
             cardSettings.forEach(c => { if (idOrder.has(c.id)) c.order = idOrder.get(c.id); });
             cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
             await saveCards(cardSettings);
-            await reloadCards();
+            await reloadCards(true);
         }
 
         function toggleView(viewId) {
@@ -383,30 +389,52 @@
             preloadImages(currentCard); 
         }
 
-        // 브라우저 렉 방지용 강력한 이미지 미리 불러오기 함수
-        function preloadImages(card) {
+        // 폴더별 파일명 패턴(공백 유무) 캐시
+        function getPatternKey(folder) { return 'cardPattern_' + folder; }
+        function getCachedPattern(folder) { return localStorage.getItem(getPatternKey(folder)); }
+        function setCachedPattern(folder, p) { localStorage.setItem(getPatternKey(folder), p); }
+
+        // 패턴 감지: 첫 이미지가 어느 URL로 로드되는지 확인 (1회 요청)
+        function detectPattern(card) {
+            const cached = getCachedPattern(card.folder);
+            if (cached) return Promise.resolve(cached);
             const folderEncoded = encodeURIComponent(card.folder);
-            
-            // 화면에 보이지 않는 임시 공간 생성
+            return new Promise(resolve => {
+                const img = new Image();
+                img.onload = () => { setCachedPattern(card.folder, 'spaced'); resolve('spaced'); };
+                img.onerror = () => { setCachedPattern(card.folder, 'plain'); resolve('plain'); };
+                img.src = `./${folderEncoded}/%20(1).webp`;
+            });
+        }
+
+        function buildFrontUrl(folder, n, pattern) {
+            const f = encodeURIComponent(folder);
+            return pattern === 'spaced' ? `./${f}/%20(${n}).webp` : `./${f}/(${n}).webp`;
+        }
+        function buildBackUrl(folder, n, pattern) {
+            const f = encodeURIComponent(folder);
+            return pattern === 'spaced' ? `./${f}/뒷면%20(${n}).webp` : `./${f}/뒷면(${n}).webp`;
+        }
+
+        // 브라우저 렉 방지용 강력한 이미지 미리 불러오기 함수
+        async function preloadImages(card) {
+            const pattern = await detectPattern(card);
+
             let hiddenDiv = document.getElementById('hidden-preload-area');
             if(!hiddenDiv) {
                 hiddenDiv = document.createElement('div');
                 hiddenDiv.id = 'hidden-preload-area';
-                hiddenDiv.style.display = 'none'; // 완벽히 숨김
+                hiddenDiv.style.display = 'none';
                 document.body.appendChild(hiddenDiv);
             }
-            hiddenDiv.innerHTML = ''; // 이전 캐시 비우기
+            hiddenDiv.innerHTML = '';
 
             for(let i = 1; i <= card.totalImages; i++) {
-                const img1 = new Image();
-                img1.src = `./${folderEncoded}/%20(${i}).webp`;
-                img1.decoding = "async"; // 비동기 처리
-                hiddenDiv.appendChild(img1);
-
-                const img2 = new Image();
-                img2.src = `./${folderEncoded}/(${i}).webp`;
-                img2.decoding = "async";
-                hiddenDiv.appendChild(img2);
+                const img = new Image();
+                img.src = buildFrontUrl(card.folder, i, pattern);
+                img.decoding = 'async';
+                img.fetchPriority = 'high';
+                hiddenDiv.appendChild(img);
             }
         }
 
@@ -465,7 +493,7 @@
                 cardSettings.push({ id: newId(), order: cardSettings.length, ...payload });
             }
             await saveCards(cardSettings);
-            await reloadCards();
+            await reloadCards(true);
             resetForm();
         };
 
@@ -492,7 +520,7 @@
             if(!confirm("삭제할까요?")) return;
             cardSettings = cardSettings.filter(c => c.id !== id);
             await saveCards(cardSettings);
-            await reloadCards();
+            await reloadCards(true);
         };
 
         // --- '전체' 버튼 ---
@@ -506,20 +534,20 @@
         };
 
         // --- 5. 🃏 렉 없는 동시 애니메이션 (시간차 부여 & Async 적용) ---
-        document.getElementById('drawBtn').onclick = () => {
+        document.getElementById('drawBtn').onclick = async () => {
             let count = parseInt(drawCountInput.value);
             const total = currentCard.totalImages;
             const isHorizontal = currentCard.orientation === 'horizontal';
-            
-            // 딜레이를 계산하기 위해 전체 뽑기 상태를 저장해둡니다.
             const wasDrawAll = isDrawAllClicked;
 
             if(isDrawAllClicked || count > 10) resultArea.classList.add('draw-all-mode');
             else resultArea.classList.remove('draw-all-mode');
-            isDrawAllClicked = false; 
-            
+            isDrawAllClicked = false;
+
             initAudio();
             playSimultaneousDrawSound();
+
+            const pattern = await detectPattern(currentCard);
 
             let nums = Array.from({length: total}, (_, i) => i + 1);
             for (let i = nums.length - 1; i > 0; i--) {
@@ -528,32 +556,23 @@
             }
             if(count > total) count = total;
             nums = nums.slice(0, count);
-            
+
             resultArea.innerHTML = '';
-            const folderEncoded = encodeURIComponent(currentCard.folder);
-            
             const fragment = document.createDocumentFragment();
 
             nums.forEach((n, index) => {
                 const container = document.createElement('div');
                 container.className = 'flip-container' + (isHorizontal ? ' horizontal' : '');
-                
-                // 🔥 브라우저 렉 방지: 전체 뽑기일 때는 0.04초, 조금 뽑을 때는 0.02초의 미세한 간격을 줍니다.
                 const delayTime = wasDrawAll ? 0.04 : 0.02;
                 container.style.animationDelay = `${index * delayTime}s`;
 
-                const frontSpaced = `./${folderEncoded}/%20(${n}).webp`;
-                const frontNormal = `./${folderEncoded}/(${n}).webp`;
-                const backSpaced = `./${folderEncoded}/뒷면%20(${n}).webp`;
-                const backNormal = `./${folderEncoded}/뒷면(${n}).webp`;
+                const frontUrl = buildFrontUrl(currentCard.folder, n, pattern);
+                const backUrl = buildBackUrl(currentCard.folder, n, pattern);
 
-                // 🔥 Async 적용: 이미지를 그릴 때 브라우저가 멈추지 않도록 합니다.
                 container.innerHTML = `
                     <div class="flipper">
-                        <img src="${frontSpaced}" class="card-front" decoding="async"
-                             onerror="this.onerror=null; this.src='${frontNormal}';">
-                        <img src="${backSpaced}" class="card-back" id="backImg_${n}" decoding="async"
-                             onerror="this.onerror=null; this.src='${backNormal}';">
+                        <img src="${frontUrl}" class="card-front" decoding="async" fetchpriority="high">
+                        <img src="${backUrl}" class="card-back" id="backImg_${n}" decoding="async">
                     </div>
                 `;
 
@@ -563,21 +582,13 @@
                     container.onclick = () => { playFlipSound(); container.classList.toggle('is-flipped'); };
                 };
                 checkBackImg.onerror = () => {
-                    const checkFallback = new Image();
-                    checkFallback.onload = () => {
-                        container.classList.add('can-flip');
-                        container.onclick = () => { playFlipSound(); container.classList.toggle('is-flipped'); };
-                    };
-                    checkFallback.onerror = () => {
-                        const backImgElement = document.getElementById(`backImg_${n}`);
-                        if(backImgElement) backImgElement.style.display = 'none';
-                    };
-                    checkFallback.src = backNormal;
+                    const backImgElement = document.getElementById(`backImg_${n}`);
+                    if(backImgElement) backImgElement.style.display = 'none';
                 };
-                checkBackImg.src = backSpaced;
+                checkBackImg.src = backUrl;
                 fragment.appendChild(container);
             });
-            
+
             resultArea.appendChild(fragment);
         };
     </script>
