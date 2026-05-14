@@ -319,11 +319,7 @@
         const drawCountInput = document.getElementById('drawCount');
 
         // --- 3. 캐시 및 데이터 동기화 ---
-        const CACHE_TTL_MS = 5 * 60 * 1000; // 5분
         const cachedCards = localStorage.getItem('cookieClassCachedCards');
-        const cachedAt = parseInt(localStorage.getItem('cookieClassCachedAt') || '0', 10);
-        const cacheIsFresh = cachedCards && (Date.now() - cachedAt) < CACHE_TTL_MS;
-
         if (cachedCards) {
             cardSettings = JSON.parse(cachedCards);
             cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -331,18 +327,18 @@
             renderTable();
         }
 
-        async function reloadCards(force = false) {
-            if (!force && cacheIsFresh) {
-                renderTable();
-                return;
-            }
+        async function reloadCards() {
             const arr = await fetchCards();
-            cardSettings = Array.isArray(arr) ? arr : [];
-            cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
-            localStorage.setItem('cookieClassCachedCards', JSON.stringify(cardSettings));
-            localStorage.setItem('cookieClassCachedAt', String(Date.now()));
-            renderLobby();
-            renderTable();
+            const fresh = Array.isArray(arr) ? arr : [];
+            fresh.sort((a, b) => (a.order || 0) - (b.order || 0));
+            const freshJson = JSON.stringify(fresh);
+            // 서버 데이터가 로컬과 다를 때만 갱신
+            if (freshJson !== localStorage.getItem('cookieClassCachedCards')) {
+                cardSettings = fresh;
+                localStorage.setItem('cookieClassCachedCards', freshJson);
+                renderLobby();
+                renderTable();
+            }
         }
         reloadCards();
 
@@ -371,7 +367,7 @@
             cardSettings.forEach(c => { if (idOrder.has(c.id)) c.order = idOrder.get(c.id); });
             cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
             await saveCards(cardSettings);
-            await reloadCards(true);
+            await reloadCards();
         }
 
         function toggleView(viewId) {
@@ -501,7 +497,7 @@
                 cardSettings.push({ id: newId(), order: cardSettings.length, ...payload });
             }
             await saveCards(cardSettings);
-            await reloadCards(true);
+            await reloadCards();
             resetForm();
         };
 
@@ -528,7 +524,7 @@
             if(!confirm("삭제할까요?")) return;
             cardSettings = cardSettings.filter(c => c.id !== id);
             await saveCards(cardSettings);
-            await reloadCards(true);
+            await reloadCards();
         };
 
         // --- '전체' 버튼 ---
