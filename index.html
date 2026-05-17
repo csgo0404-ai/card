@@ -245,7 +245,7 @@
 // 폰트가 모두 다운로드되면 화면을 부드럽게 띄움
         document.fonts.ready.then(() => document.body.classList.add('fonts-loaded'));
         // --- 1. Cloudflare KV API ---
-        const API = '/api/cards';
+        const API = 'https://card.csgo0404.workers.dev/api/cards';
         let adminPw = '';
 
         async function fetchCards() {
