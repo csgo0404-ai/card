@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>우리반 - 카드 모음집</title>
+    <title>우리반 - 생각 책방</title>
     <link href="https://fonts.googleapis.com/css2?family=Dongle:wght@400;700&family=Jua&display=swap" rel="stylesheet">
     
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
@@ -36,7 +36,7 @@
         header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 4px solid var(--wood-dark); padding-bottom: 15px; }
         
         .title-wrap { display: flex; align-items: center; justify-content: center; flex-grow: 1; position: relative; }
-        h1 { margin: 0; font-size: 2.8rem; color: var(--wood-dark); text-align: center; text-shadow: 2px 2px 0 rgba(0,0,0,0.1); }
+        h1 { margin: 0; font-size: 4.2rem; color: var(--wood-dark); text-align: center; text-shadow: 2px 2px 0 rgba(0,0,0,0.1); }
         
         .hidden { display: none !important; }
         
@@ -56,50 +56,47 @@
         .setting-btn:hover { transform: rotate(45deg) scale(1.1); }
 
         /* 📚 가로 5열 우드 진열대 스타일 */
-        .grid-container { 
-            display: grid; 
-            grid-template-columns: repeat(5, 1fr); 
-            gap: 0 25px; 
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 0 25px;
             background-color: var(--wood-bg);
-            background-image: repeating-linear-gradient(to bottom, transparent, transparent 180px, var(--wood-shelf) 180px, var(--wood-shelf) 200px);
+            background-image: repeating-linear-gradient(to bottom, transparent, transparent 320px, var(--wood-shelf) 320px, var(--wood-shelf) 345px);
             border-radius: 15px; border: 8px solid var(--wood-dark);
             box-shadow: inset 0 10px 20px rgba(0,0,0,0.5);
-            grid-auto-rows: 200px; 
-            align-items: end; padding: 0 40px; min-height: 400px;
+            grid-auto-rows: 345px;
+            align-items: end; padding: 0 40px; min-height: 690px;
         }
-        
-        /* 📖 로비: 베이지톤 책 모양 (Dongle체 적용) */
-        .card-category { 
-            height: 130px; width: 100%; max-width: 220px; 
-            margin: 0 auto 20px auto; 
-            background: linear-gradient(135deg, #fff3e0, #f5e6d3); 
-            border-left: 18px solid #8d6e63; 
-            border-radius: 6px 15px 15px 6px; color: #4e342e; 
-            font-size: 2.6rem; 
-            cursor: pointer; 
+
+        /* 📖 로비: 베이지톤 책 모양 */
+        .card-category {
+            height: 250px; width: 100%; max-width: 175px;
+            margin: 0 auto 32px auto;
+            background: linear-gradient(135deg, #fff3e0, #f5e6d3);
+            border-left: 18px solid #8d6e63;
+            border-radius: 6px 15px 15px 6px; color: #4e342e;
+            font-size: 3.9rem;
+            cursor: pointer;
             display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
-            box-shadow: inset -5px 0 10px rgba(0,0,0,0.05), 5px 5px 8px rgba(0,0,0,0.4); 
+            box-shadow: inset -5px 0 10px rgba(0,0,0,0.05), 5px 5px 8px rgba(0,0,0,0.4);
             transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1); padding: 8px 15px; position: relative;
             font-family: 'Dongle', sans-serif; font-weight: 700; line-height: 1.0; word-break: keep-all;
             transform-origin: bottom center; will-change: transform; z-index: 2;
         }
-        
-        /* 📌 길어진 갈색 인덱스 */
         .card-category::before {
-            content: ''; position: absolute; top: -10px; right: 25px; 
+            content: ''; position: absolute; top: -10px; right: 25px;
             width: 22px; height: 38px;
             background-color: #5d4037; border-radius: 4px 4px 2px 2px;
             box-shadow: inset -2px 0 4px rgba(0,0,0,0.2), 2px 2px 5px rgba(0,0,0,0.3);
-            z-index: -1; 
+            z-index: -1;
         }
-        
         .card-category::after {
             content: ''; position: absolute; right: 0; top: 6px; bottom: 6px; width: 6px;
             background: rgba(255,255,255,0.9); border-radius: 0 10px 10px 0;
         }
-        .card-category:hover { 
-            transform: scale(1.05) translateY(-6px) rotate(-1deg); 
-            box-shadow: inset -5px 0 10px rgba(0,0,0,0.05), 10px 15px 20px rgba(0,0,0,0.6); 
+        .card-category:hover {
+            transform: scale(1.05) translateY(-6px) rotate(-1deg);
+            box-shadow: inset -5px 0 10px rgba(0,0,0,0.05), 10px 15px 20px rgba(0,0,0,0.6);
             z-index: 5;
         }
 
@@ -139,10 +136,10 @@
         .flip-container.is-flipped .flipper { transform: rotateY(180deg); }
         .flip-container.is-flipped:hover .flipper { transform: rotateY(180deg) scale(1.05); }
 
-        .card-front, .card-back { 
-            width: 100%; height: 100%; position: absolute; top: 0; left: 0; 
-            backface-visibility: hidden; border-radius: 20px; box-shadow: 0 10px 20px rgba(0,0,0,0.2); 
-            object-fit: contain; background-color: white; padding: 10px; box-sizing: border-box; 
+        .card-front, .card-back {
+            width: 100%; height: 100%; position: absolute; top: 0; left: 0;
+            backface-visibility: hidden; border-radius: 20px; box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+            object-fit: contain; background-color: white; padding: 10px; box-sizing: border-box;
         }
         .card-back { transform: rotateY(180deg); }
 
@@ -216,7 +213,7 @@
         <header>
             <button id="backBtn" class="icon-btn hidden">◀ 서재로</button>
             <div class="title-wrap">
-                <h1 id="mainTitle">카드 모음집</h1>
+                <h1 id="mainTitle">생각 책방</h1>
                 <button id="drawAllBtn" class="btn-draw-all-top btn-draw-all hidden">전체</button>
             </div>
             <div id="teacherHeaderBtns" style="display:none; gap:10px; align-items:center;">
@@ -231,11 +228,10 @@
         <main>
             <section id="studentLobby">
                 <div style="display:flex; align-items:center; gap:0;">
-                    <button id="lobbyPrevBtn" onclick="lobbyChangePage(-1)" style="display:none; background:none; border:none; font-size:3rem; color:#d7ccc8; cursor:pointer; padding:0 10px; line-height:1; transition:.2s; flex-shrink:0;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#d7ccc8'">‹</button>
+                    <button id="lobbyPrevBtn" onclick="lobbyChangePage(-1)" style="display:none; background:none; border:none; font-size:3.5rem; color:#8d6e63; cursor:pointer; padding:0 12px; line-height:1; transition:.2s; flex-shrink:0;" onmouseover="this.style.color='#4e342e'" onmouseout="this.style.color='#8d6e63'">‹</button>
                     <div id="cardGrid" class="grid-container" style="flex:1;"></div>
-                    <button id="lobbyNextBtn" onclick="lobbyChangePage(1)"  style="display:none; background:none; border:none; font-size:3rem; color:#d7ccc8; cursor:pointer; padding:0 10px; line-height:1; transition:.2s; flex-shrink:0;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#d7ccc8'">›</button>
+                    <button id="lobbyNextBtn" onclick="lobbyChangePage(1)"  style="display:none; background:none; border:none; font-size:3.5rem; color:#8d6e63; cursor:pointer; padding:0 12px; line-height:1; transition:.2s; flex-shrink:0;" onmouseover="this.style.color='#4e342e'" onmouseout="this.style.color='#8d6e63'">›</button>
                 </div>
-                <div id="lobbyPageInfo" style="text-align:center; color:#a1887f; font-size:1rem; margin-top:8px; display:none;"></div>
             </section>
 
             <section id="drawView" class="hidden">
@@ -381,7 +377,7 @@
         let currentCard = null;
         let isDrawAllClicked = false;
         let lobbyPage = 0;
-        const LOBBY_PER_PAGE = 15;
+        const LOBBY_PER_PAGE = 10;
 
         // ===== IndexedDB (거울카드 로컬 저장) =====
         let _idb = null;
@@ -458,15 +454,12 @@
             const totalPages = Math.max(1, Math.ceil(visible.length / LOBBY_PER_PAGE));
             if (lobbyPage >= totalPages) lobbyPage = totalPages - 1;
             const page = visible.slice(lobbyPage * LOBBY_PER_PAGE, (lobbyPage + 1) * LOBBY_PER_PAGE);
-            cardGrid.innerHTML = page.map((c) =>
+            cardGrid.innerHTML = page.map(c =>
                 `<div class="card-category" onclick="startDraw('${c.id}')">${c.name}</div>`
             ).join('');
             const usePaging = visible.length > LOBBY_PER_PAGE;
             document.getElementById('lobbyPrevBtn').style.display = usePaging ? 'block' : 'none';
             document.getElementById('lobbyNextBtn').style.display = usePaging ? 'block' : 'none';
-            const pageInfo = document.getElementById('lobbyPageInfo');
-            pageInfo.style.display = usePaging ? 'block' : 'none';
-            if (usePaging) pageInfo.textContent = `${lobbyPage + 1} / ${totalPages}`;
             document.getElementById('lobbyPrevBtn').style.opacity = lobbyPage === 0 ? '0.3' : '1';
             document.getElementById('lobbyNextBtn').style.opacity = lobbyPage === totalPages - 1 ? '0.3' : '1';
         }
@@ -629,7 +622,7 @@
             toggleView('teacherView');
             mainTitle.textContent = "카드 설정";
         };
-        document.getElementById('backBtn').onclick = () => { toggleView('studentLobby'); mainTitle.textContent = "카드 모음집"; resetForm(); };
+        document.getElementById('backBtn').onclick = () => { toggleView('studentLobby'); mainTitle.textContent = "생각 책방"; resetForm(); };
 
         document.getElementById('addCardBtn').onclick = async () => {
             const name = document.getElementById('newCardName').value.trim();
