@@ -219,6 +219,12 @@
                 <h1 id="mainTitle">카드 모음집</h1>
                 <button id="drawAllBtn" class="btn-draw-all-top btn-draw-all hidden">전체</button>
             </div>
+            <div id="teacherHeaderBtns" style="display:none; gap:10px; align-items:center;">
+                <button id="mirrorBatchBtn" class="action-btn" style="font-size:.95rem; padding:10px 18px; background:#7b5ea7; white-space:nowrap;">🪞 일괄 등록</button>
+                <button id="exportBtn"      class="action-btn" style="font-size:.95rem; padding:10px 18px; background:#5d8a5e; white-space:nowrap;">📤 내보내기</button>
+                <button id="importBtn"      class="action-btn" style="font-size:.95rem; padding:10px 18px; background:#5d7a8a; white-space:nowrap;">📥 불러오기</button>
+                <input type="file" id="importFile" accept=".json" style="display:none;">
+            </div>
             <button id="goTeacherBtn" class="setting-btn" title="카드 설정">⚙️</button>
         </header>
 
@@ -239,31 +245,27 @@
             </section>
 
             <section id="teacherView" class="hidden">
-                <h2 style="font-family:'Jua'; margin-top:0;">카드 설정</h2>
-                <div class="add-card-box">
-                    <input type="text" id="newCardName" placeholder="표시 이름 (예: 도란도란)">
-                    <input type="text" id="newCardFolder" placeholder="폴더명">
-                    <select id="newCardOrientation">
-                        <option value="vertical">세로형 ↕</option>
-                        <option value="horizontal">가로형 ↔</option>
-                    </select>
-                    <input type="number" id="newCardTotal" placeholder="장수">
-                    <button id="addCardBtn" class="action-btn" style="font-size:1rem; padding:10px 20px;">저장</button>
-                    <button id="cancelEditBtn" class="icon-btn hidden" style="background:#666;">취소</button>
-                </div>
-                <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
-                    <button id="mirrorBatchBtn" class="action-btn" style="font-size:1rem; padding:10px 20px; background:#7b5ea7;">🪞 거울카드 일괄 등록</button>
-                    <button id="exportBtn" class="action-btn" style="font-size:1rem; padding:10px 20px; background:#5d8a5e;">📤 내보내기</button>
-                    <button id="importBtn" class="action-btn" style="font-size:1rem; padding:10px 20px; background:#5d7a8a;">📥 불러오기</button>
-                    <input type="file" id="importFile" accept=".json" style="display:none;">
-                </div>
-                <div class="table-container">
-                    <table class="teacher-table">
-                        <thead>
-                            <tr><th style="width: 50px;">순서</th><th>표시 이름</th><th>폴더명</th><th>형태</th><th>장수</th><th>관리</th></tr>
-                        </thead>
-                        <tbody id="cardManageList"></tbody>
-                    </table>
+                <div>
+                    <h2 style="font-family:'Jua'; margin-top:0;">카드 설정</h2>
+                    <div class="add-card-box">
+                            <input type="text" id="newCardName" placeholder="표시 이름 (예: 도란도란)">
+                            <input type="text" id="newCardFolder" placeholder="폴더명">
+                            <select id="newCardOrientation">
+                                <option value="vertical">세로형 ↕</option>
+                                <option value="horizontal">가로형 ↔</option>
+                            </select>
+                            <input type="number" id="newCardTotal" placeholder="장수">
+                            <button id="addCardBtn" class="action-btn" style="font-size:1rem; padding:10px 20px;">저장</button>
+                            <button id="cancelEditBtn" class="icon-btn hidden" style="background:#666;">취소</button>
+                        </div>
+                    <div class="table-container">
+                        <table class="teacher-table">
+                            <thead>
+                                <tr><th style="width:40px;">순서</th><th>표시 이름</th><th>폴더명</th><th>형태</th><th>장수</th><th style="width:60px;">보이기</th><th style="width:60px;">관리</th></tr>
+                            </thead>
+                            <tbody id="cardManageList"></tbody>
+                        </table>
+                    </div>
                 </div>
             </section>
         </main>
@@ -445,23 +447,37 @@
         reloadCards();
 
         function renderLobby() {
-            cardGrid.innerHTML = cardSettings.map((c) => {
-                return `<div class="card-category" onclick="startDraw('${c.id}')">${c.name}${c.customPairs ? '<br><span style="font-size:1rem;opacity:.7;">🪞</span>' : ''}</div>`;
-            }).join('');
+            cardGrid.innerHTML = cardSettings
+                .filter(c => !c.hidden)
+                .map((c) => `<div class="card-category" onclick="startDraw('${c.id}')">${c.name}</div>`)
+                .join('');
         }
 
         function renderTable() {
             cardManageList.innerHTML = cardSettings.map((c) => `
-                <tr data-id="${c.id}" onclick="${c.customPairs ? '' : `startEdit('${c.id}')`}">
+                <tr data-id="${c.id}" onclick="startEdit('${c.id}')" style="${c.hidden ? 'opacity:.5;' : ''}">
                     <td class="drag-handle">☰</td>
-                    <td>${c.name}${c.customPairs ? ' 🪞' : ''}</td>
+                    <td>${c.name}</td>
                     <td>${c.folder || ''}</td>
                     <td><span style="background:${c.customPairs ? '#7b5ea7' : '#8d6e63'}; padding:3px 8px; border-radius:10px; font-size:0.9rem;">${c.orientation === 'horizontal' ? '가로 ↔' : '세로 ↕'}</span></td>
                     <td>${c.totalImages}장</td>
+                    <td style="text-align:center;">
+                        <button onclick="event.stopPropagation(); toggleCardHidden('${c.id}')"
+                            style="background:${c.hidden ? '#6d4c41' : '#66bb6a'}; border:none; color:#fff; padding:5px 12px; border-radius:10px; cursor:pointer; font-family:'Jua',sans-serif; font-size:.85rem;">
+                            ${c.hidden ? '숨김' : '보임'}
+                        </button>
+                    </td>
                     <td><button class="delete-btn" onclick="event.stopPropagation(); deleteCard('${c.id}')">삭제</button></td>
                 </tr>
             `).join('');
             new Sortable(cardManageList, { handle: '.drag-handle', animation: 150, onEnd: saveNewOrder });
+        }
+
+        async function toggleCardHidden(id) {
+            const c = cardSettings.find(c => c.id === id);
+            if (!c) return;
+            c.hidden = !c.hidden;
+            await saveCards(cardSettings);
         }
 
         async function saveNewOrder() {
@@ -476,10 +492,11 @@
         function toggleView(viewId) {
             ['studentLobby', 'drawView', 'teacherView'].forEach(id => document.getElementById(id).classList.add('hidden'));
             document.getElementById(viewId).classList.remove('hidden');
-            
+
             document.getElementById('backBtn').classList.toggle('hidden', viewId === 'studentLobby');
             document.getElementById('goTeacherBtn').classList.toggle('hidden', viewId !== 'studentLobby');
             document.getElementById('drawAllBtn').classList.toggle('hidden', viewId !== 'drawView');
+            document.getElementById('teacherHeaderBtns').style.display = viewId === 'teacherView' ? 'flex' : 'none';
         }
 
         // --- 4. 대기 화면 설정 및 강력한 Preload ---
@@ -588,16 +605,23 @@
 
         document.getElementById('addCardBtn').onclick = async () => {
             const name = document.getElementById('newCardName').value.trim();
-            const folder = document.getElementById('newCardFolder').value.trim();
-            const orientation = document.getElementById('newCardOrientation').value;
-            const total = document.getElementById('newCardTotal').value;
-            if(!name || !folder || !total) return alert("내용을 모두 채워주세요!");
-            const payload = { name, folder, orientation, totalImages: parseInt(total) };
-            if(editingId) {
-                const idx = cardSettings.findIndex(c => c.id === editingId);
-                if(idx >= 0) cardSettings[idx] = { ...cardSettings[idx], ...payload };
+            const editingCard = editingId && cardSettings.find(c => c.id === editingId);
+            if (editingCard && editingCard.customPairs) {
+                // 거울카드: 이름만 수정
+                if (!name) return alert("이름을 입력해 주세요!");
+                editingCard.name = name;
             } else {
-                cardSettings.push({ id: newId(), order: cardSettings.length, ...payload });
+                const folder = document.getElementById('newCardFolder').value.trim();
+                const orientation = document.getElementById('newCardOrientation').value;
+                const total = document.getElementById('newCardTotal').value;
+                if (!name || !folder || !total) return alert("내용을 모두 채워주세요!");
+                const payload = { name, folder, orientation, totalImages: parseInt(total) };
+                if (editingId) {
+                    const idx = cardSettings.findIndex(c => c.id === editingId);
+                    if (idx >= 0) cardSettings[idx] = { ...cardSettings[idx], ...payload };
+                } else {
+                    cardSettings.push({ id: newId(), order: cardSettings.length, ...payload });
+                }
             }
             await saveCards(cardSettings);
             await reloadCards();
@@ -608,17 +632,26 @@
             const c = cardSettings.find(card => card.id === id);
             editingId = id;
             document.getElementById('newCardName').value = c.name;
-            document.getElementById('newCardFolder').value = c.folder;
+            const isMirror = !!c.customPairs;
+            document.getElementById('newCardFolder').value = isMirror ? '(거울카드 — 폴더 변경 불가)' : (c.folder || '');
             document.getElementById('newCardOrientation').value = c.orientation || 'vertical';
-            document.getElementById('newCardTotal').value = c.totalImages;
+            document.getElementById('newCardTotal').value = isMirror ? c.totalImages + ' (수정 불가)' : c.totalImages;
+            document.getElementById('newCardFolder').disabled = isMirror;
+            document.getElementById('newCardOrientation').disabled = isMirror;
+            document.getElementById('newCardTotal').disabled = isMirror;
             document.getElementById('addCardBtn').textContent = "수정하기";
             document.getElementById('cancelEditBtn').classList.remove('hidden');
         }
 
         function resetForm() {
             editingId = null;
-            ['newCardName', 'newCardFolder', 'newCardTotal'].forEach(id => document.getElementById(id).value = '');
+            ['newCardName', 'newCardFolder', 'newCardTotal'].forEach(id => {
+                const el = document.getElementById(id);
+                el.value = '';
+                el.disabled = false;
+            });
             document.getElementById('newCardOrientation').value = 'vertical';
+            document.getElementById('newCardOrientation').disabled = false;
             document.getElementById('addCardBtn').textContent = "저장하기";
             document.getElementById('cancelEditBtn').classList.add('hidden');
         }
