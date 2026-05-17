@@ -180,13 +180,35 @@
         .add-card-box input[type="text"] { flex: 2; min-width: 120px; }
         .add-card-box input[type="number"] { flex: 1; min-width: 80px; }
         .add-card-box select { flex: 1; min-width: 100px; cursor: pointer; }
-        
+
         .table-container { border-radius: 15px; overflow: hidden; background: #4e342e; }
         .teacher-table { width: 100%; border-collapse: collapse; color: white; font-family: 'Malgun Gothic', sans-serif;}
         .teacher-table th { background-color: #3e2723; padding: 15px; text-align: center; }
         .teacher-table td { padding: 12px; border-bottom: 1px solid #6d4c41; text-align: center; font-size: 1rem; }
         .drag-handle { cursor: grab; font-size: 1.2rem; color: #bcaaa4; padding: 0 10px; }
         .delete-btn { background-color: #ef5350; border: none; color: white; padding: 7px 15px; border-radius: 10px; cursor: pointer; font-family: 'Jua', sans-serif; }
+
+        /* 🪞 거울카드 일괄 등록 모달 */
+        #mirrorModal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:9999; overflow-y:auto; padding:24px; }
+        .mirror-box { background:#3e2723; border-radius:24px; max-width:900px; margin:0 auto; padding:28px; color:#fffaf0; }
+        .mirror-box h3 { margin:0 0 16px; font-size:1.6rem; }
+        .mirror-img-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:12px; margin:16px 0; }
+        .mirror-img-item { position:relative; border-radius:14px; overflow:hidden; border:3px solid #6d4c41; cursor:pointer; transition:.2s; }
+        .mirror-img-item img { width:100%; aspect-ratio:3/4; object-fit:cover; display:block; }
+        .mirror-img-item.is-front { border-color:#66bb6a; }
+        .mirror-img-item.is-back  { border-color:#42a5f5; }
+        .mirror-role-badge { position:absolute; bottom:0; left:0; right:0; text-align:center; font-size:.85rem; font-weight:700; padding:4px 0; }
+        .mirror-img-item.is-front .mirror-role-badge { background:rgba(102,187,106,.9); color:#fff; }
+        .mirror-img-item.is-back  .mirror-role-badge { background:rgba(66,165,245,.9);  color:#fff; }
+        .mirror-img-item.is-none  .mirror-role-badge { background:rgba(0,0,0,.5); color:#ddd; }
+        .mirror-pair-preview { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; margin-top:12px; }
+        .mirror-pair-card { background:#5d4037; border-radius:14px; padding:10px; display:flex; gap:8px; align-items:center; }
+        .mirror-pair-card img { width:72px; height:96px; object-fit:cover; border-radius:8px; }
+        .mirror-pair-arrow { font-size:1.4rem; color:#bcaaa4; }
+        .mirror-modal-btns { display:flex; gap:12px; margin-top:20px; flex-wrap:wrap; }
+        .mirror-btn-primary { background:#8d6e63; color:#fff; border:none; padding:12px 28px; border-radius:20px; font-size:1.1rem; font-family:'Jua',sans-serif; cursor:pointer; box-shadow:0 4px 0 #5d4037; }
+        .mirror-btn-primary:active { transform:translateY(4px); box-shadow:none; }
+        .mirror-btn-cancel  { background:#4e342e; color:#bcaaa4; border:none; padding:12px 22px; border-radius:20px; font-size:1.1rem; font-family:'Jua',sans-serif; cursor:pointer; }
     </style>
 </head>
 <body>
@@ -229,6 +251,12 @@
                     <button id="addCardBtn" class="action-btn" style="font-size:1rem; padding:10px 20px;">저장</button>
                     <button id="cancelEditBtn" class="icon-btn hidden" style="background:#666;">취소</button>
                 </div>
+                <div style="display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap;">
+                    <button id="mirrorBatchBtn" class="action-btn" style="font-size:1rem; padding:10px 20px; background:#7b5ea7;">🪞 거울카드 일괄 등록</button>
+                    <button id="exportBtn" class="action-btn" style="font-size:1rem; padding:10px 20px; background:#5d8a5e;">📤 내보내기</button>
+                    <button id="importBtn" class="action-btn" style="font-size:1rem; padding:10px 20px; background:#5d7a8a;">📥 불러오기</button>
+                    <input type="file" id="importFile" accept=".json" style="display:none;">
+                </div>
                 <div class="table-container">
                     <table class="teacher-table">
                         <thead>
@@ -239,6 +267,37 @@
                 </div>
             </section>
         </main>
+    </div>
+
+    <!-- 🪞 거울카드 일괄 등록 모달 -->
+    <div id="mirrorModal">
+        <div class="mirror-box">
+            <h3>🪞 거울카드 일괄 등록</h3>
+            <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+                <input type="text" id="mirrorCardName" placeholder="카드 이름 (예: 거울카드)" style="padding:10px 14px; border-radius:12px; border:none; font-family:'Jua',sans-serif; font-size:1.1rem; color:#4e342e; flex:1; min-width:140px;">
+                <input type="text" id="mirrorCardFolder" placeholder="GitHub 폴더명 (예: 거울카드)" style="padding:10px 14px; border-radius:12px; border:none; font-family:'Jua',sans-serif; font-size:1.1rem; color:#4e342e; flex:1; min-width:140px;">
+                <select id="mirrorCardOrientation" style="padding:10px 14px; border-radius:12px; border:none; font-family:'Jua',sans-serif; font-size:1.1rem; color:#4e342e;">
+                    <option value="vertical">세로형 ↕</option>
+                    <option value="horizontal">가로형 ↔</option>
+                </select>
+            </div>
+            <p style="font-size:.85rem; color:#bcaaa4; margin:0 0 10px;">💡 이미지를 GitHub 폴더에 업로드한 뒤, 폴더명을 입력하고 같은 파일들을 선택하세요.</p>
+            <label style="display:inline-block; background:#8d6e63; color:#fff; padding:10px 22px; border-radius:20px; cursor:pointer; font-size:1rem; font-family:'Jua',sans-serif; box-shadow:0 4px 0 #5d4037;">
+                📁 이미지 선택 (여러 장)
+                <input type="file" id="mirrorFileInput" accept="image/*" multiple style="display:none;" onchange="handleMirrorFiles(this.files)">
+            </label>
+            <p style="font-size:.9rem; color:#bcaaa4; margin:10px 0 4px;">이미지를 클릭해서 <span style="color:#a5d6a7;">앞면</span> / <span style="color:#90caf9;">뒷면</span>을 지정하세요.</p>
+            <div id="mirrorImgGrid" class="mirror-img-grid"></div>
+            <div id="mirrorPairSection" style="display:none;">
+                <p style="font-weight:700; margin:16px 0 8px; font-size:1rem;">📌 짝 미리보기 <span id="mirrorPairCount" style="color:#bcaaa4; font-size:.9rem;"></span></p>
+                <div id="mirrorPairPreview" class="mirror-pair-preview"></div>
+            </div>
+            <div class="mirror-modal-btns">
+                <button class="mirror-btn-primary" onclick="saveMirrorCard()">✅ 등록하기</button>
+                <button class="mirror-btn-cancel" onclick="closeMirrorModal()">취소</button>
+            </div>
+            <p id="mirrorStatus" style="margin-top:12px; font-size:.9rem; color:#a5d6a7;"></p>
+        </div>
     </div>
 
     <script>
@@ -309,10 +368,52 @@
             osc.start(); osc.stop(audioCtx.currentTime + 0.3);
         }
 
-        let cardSettings = [];
+        let cardSettings = [];   // KV 카드 (서버)
+        let mirrorCards  = [];   // 거울카드 (IndexedDB 로컬)
         let editingId = null;
         let currentCard = null;
-        let isDrawAllClicked = false; 
+        let isDrawAllClicked = false;
+
+        // ===== IndexedDB (거울카드 로컬 저장) =====
+        let _idb = null;
+        function openIDB() {
+            if (_idb) return Promise.resolve(_idb);
+            return new Promise((res, rej) => {
+                const req = indexedDB.open('mirrorCards', 1);
+                req.onupgradeneeded = e => e.target.result.createObjectStore('cards', { keyPath: 'id' });
+                req.onsuccess = e => { _idb = e.target.result; res(_idb); };
+                req.onerror   = e => rej(e.target.error);
+            });
+        }
+        async function idbGetAll() {
+            const db = await openIDB();
+            return new Promise((res, rej) => {
+                const tx = db.transaction('cards', 'readonly');
+                const req = tx.objectStore('cards').getAll();
+                req.onsuccess = e => res(e.target.result || []);
+                req.onerror   = e => rej(e.target.error);
+            });
+        }
+        async function idbPut(card) {
+            const db = await openIDB();
+            return new Promise((res, rej) => {
+                const tx = db.transaction('cards', 'readwrite');
+                tx.objectStore('cards').put(card);
+                tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
+            });
+        }
+        async function idbDelete(id) {
+            const db = await openIDB();
+            return new Promise((res, rej) => {
+                const tx = db.transaction('cards', 'readwrite');
+                tx.objectStore('cards').delete(id);
+                tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
+            });
+        }
+        async function loadMirrorCards() {
+            mirrorCards = await idbGetAll();
+            mirrorCards.sort((a, b) => (a.order || 0) - (b.order || 0));
+        }
 
         const mainTitle = document.getElementById('mainTitle');
         const cardGrid = document.getElementById('cardGrid');
@@ -334,28 +435,28 @@
             const fresh = Array.isArray(arr) ? arr : [];
             fresh.sort((a, b) => (a.order || 0) - (b.order || 0));
             const freshJson = JSON.stringify(fresh);
-            // 서버 데이터가 로컬과 다를 때만 갱신
             if (freshJson !== localStorage.getItem('cookieClassCachedCards')) {
                 cardSettings = fresh;
                 localStorage.setItem('cookieClassCachedCards', freshJson);
-                renderLobby();
-                renderTable();
             }
+            renderLobby();
+            renderTable();
         }
         reloadCards();
 
         function renderLobby() {
             cardGrid.innerHTML = cardSettings.map((c) => {
-                return `<div class="card-category" onclick="startDraw('${c.id}')">${c.name}</div>`;
+                return `<div class="card-category" onclick="startDraw('${c.id}')">${c.name}${c.customPairs ? '<br><span style="font-size:1rem;opacity:.7;">🪞</span>' : ''}</div>`;
             }).join('');
         }
 
         function renderTable() {
             cardManageList.innerHTML = cardSettings.map((c) => `
-                <tr data-id="${c.id}" onclick="startEdit('${c.id}')">
+                <tr data-id="${c.id}" onclick="${c.customPairs ? '' : `startEdit('${c.id}')`}">
                     <td class="drag-handle">☰</td>
-                    <td>${c.name}</td><td>${c.folder}</td>
-                    <td><span style="background:#8d6e63; padding:3px 8px; border-radius:10px; font-size:0.9rem;">${c.orientation === 'horizontal' ? '가로 ↔' : '세로 ↕'}</span></td>
+                    <td>${c.name}${c.customPairs ? ' 🪞' : ''}</td>
+                    <td>${c.folder || ''}</td>
+                    <td><span style="background:${c.customPairs ? '#7b5ea7' : '#8d6e63'}; padding:3px 8px; border-radius:10px; font-size:0.9rem;">${c.orientation === 'horizontal' ? '가로 ↔' : '세로 ↕'}</span></td>
                     <td>${c.totalImages}장</td>
                     <td><button class="delete-btn" onclick="event.stopPropagation(); deleteCard('${c.id}')">삭제</button></td>
                 </tr>
@@ -522,12 +623,167 @@
             document.getElementById('cancelEditBtn').classList.add('hidden');
         }
 
+        document.getElementById('exportBtn').onclick = () => {
+            const blob = new Blob([JSON.stringify(cardSettings, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = '카드설정_' + new Date().toISOString().slice(0,10) + '.json';
+            a.click();
+        };
+
+        document.getElementById('importBtn').onclick = () => document.getElementById('importFile').click();
+        document.getElementById('importFile').onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const parsed = JSON.parse(text);
+                if (!Array.isArray(parsed)) throw new Error();
+                if (!confirm(`${parsed.length}개의 카드 설정을 불러옵니다. 기존 설정을 덮어씁니다.`)) return;
+                await saveCards(parsed);
+                alert('불러오기 완료!');
+            } catch {
+                alert('올바른 카드 설정 파일이 아닙니다.');
+            }
+            e.target.value = '';
+        };
+
         window.deleteCard = async (id) => {
             if(!confirm("삭제할까요?")) return;
             cardSettings = cardSettings.filter(c => c.id !== id);
             await saveCards(cardSettings);
             await reloadCards();
         };
+
+        // 🪞 거울카드: preload 스킵
+        const _origPreload = preloadImages;
+        preloadImages = async (card) => {
+            if (card.customPairs) return; // base64 이미 메모리에 있음
+            return _origPreload(card);
+        };
+
+        document.getElementById('mirrorBatchBtn').onclick = openMirrorModal;
+
+        // ===== 거울카드 일괄 등록 =====
+        let _mirrorImages = []; // [{file, dataUrl, role: 'front'|'back'|'none'}]
+
+        function openMirrorModal() {
+            _mirrorImages = [];
+            document.getElementById('mirrorCardName').value = '';
+            document.getElementById('mirrorCardFolder').value = '';
+            document.getElementById('mirrorImgGrid').innerHTML = '';
+            document.getElementById('mirrorPairSection').style.display = 'none';
+            document.getElementById('mirrorStatus').textContent = '';
+            document.getElementById('mirrorFileInput').value = '';
+            document.getElementById('mirrorModal').style.display = 'block';
+        }
+        function closeMirrorModal() {
+            document.getElementById('mirrorModal').style.display = 'none';
+        }
+        document.getElementById('mirrorModal').addEventListener('click', e => {
+            if (e.target === document.getElementById('mirrorModal')) closeMirrorModal();
+        });
+
+        function handleMirrorFiles(files) {
+            // blob URL 방식 — base64 변환 없음
+            _mirrorImages.forEach(m => { if (m.blobUrl) URL.revokeObjectURL(m.blobUrl); });
+            _mirrorImages = [...files].map(file => ({
+                file,
+                name: file.name,
+                blobUrl: URL.createObjectURL(file),
+                role: 'none'
+            }));
+            _mirrorImages.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+            renderMirrorGrid();
+        }
+
+        function renderMirrorGrid() {
+            const grid = document.getElementById('mirrorImgGrid');
+            grid.innerHTML = _mirrorImages.map((m, i) => {
+                const roleClass = m.role === 'front' ? 'is-front' : m.role === 'back' ? 'is-back' : 'is-none';
+                const roleNum  = m.role === 'front'
+                    ? '앞면 ' + (_mirrorImages.slice(0,i+1).filter(x=>x.role==='front').length)
+                    : m.role === 'back'
+                    ? '뒷면 ' + (_mirrorImages.slice(0,i+1).filter(x=>x.role==='back').length)
+                    : '미지정';
+                return `<div class="mirror-img-item ${roleClass}" onclick="cycleMirrorRole(${i})">
+                    <img src="${m.blobUrl}" alt="${m.name}">
+                    <div class="mirror-role-badge">${roleNum}<br><span style="font-size:.7rem;opacity:.7;">${m.name}</span></div>
+                </div>`;
+            }).join('');
+            updateMirrorPairPreview();
+        }
+
+        function cycleMirrorRole(idx) {
+            const order = ['none', 'front', 'back'];
+            const cur = _mirrorImages[idx].role;
+            _mirrorImages[idx].role = order[(order.indexOf(cur) + 1) % order.length];
+            renderMirrorGrid();
+        }
+
+        function updateMirrorPairPreview() {
+            const fronts = _mirrorImages.filter(m => m.role === 'front');
+            const backs  = _mirrorImages.filter(m => m.role === 'back');
+            const count  = Math.min(fronts.length, backs.length);
+            const sec    = document.getElementById('mirrorPairSection');
+            const preview= document.getElementById('mirrorPairPreview');
+            const cntEl  = document.getElementById('mirrorPairCount');
+            if (!count) { sec.style.display = 'none'; return; }
+            sec.style.display = 'block';
+            cntEl.textContent = `(${count}쌍)`;
+            preview.innerHTML = Array.from({length: count}, (_, i) => `
+                <div class="mirror-pair-card">
+                    <img src="${fronts[i].blobUrl}" title="앞면 ${i+1}">
+                    <span class="mirror-pair-arrow">↔</span>
+                    <img src="${backs[i].blobUrl}" title="뒷면 ${i+1}">
+                    <span style="font-size:.7rem; color:#bcaaa4; margin-left:4px;">${fronts[i].name}<br>↕<br>${backs[i].name}</span>
+                </div>`).join('');
+        }
+
+        async function resizeToDataUrl(dataUrl, maxPx = 900, quality = 0.82) {
+            return new Promise(res => {
+                const img = new Image();
+                img.onload = () => {
+                    let { width: w, height: h } = img;
+                    if (w > maxPx || h > maxPx) {
+                        const ratio = Math.min(maxPx / w, maxPx / h);
+                        w = Math.round(w * ratio); h = Math.round(h * ratio);
+                    }
+                    const cv = document.createElement('canvas');
+                    cv.width = w; cv.height = h;
+                    cv.getContext('2d').drawImage(img, 0, 0, w, h);
+                    res(cv.toDataURL('image/jpeg', quality));
+                };
+                img.src = dataUrl;
+            });
+        }
+
+        async function saveMirrorCard() {
+            const name   = document.getElementById('mirrorCardName').value.trim();
+            const folder = document.getElementById('mirrorCardFolder').value.trim();
+            if (!name)   { alert('카드 이름을 입력해 주세요.'); return; }
+            if (!folder) { alert('GitHub 폴더명을 입력해 주세요.'); return; }
+            const fronts = _mirrorImages.filter(m => m.role === 'front');
+            const backs  = _mirrorImages.filter(m => m.role === 'back');
+            const count  = Math.min(fronts.length, backs.length);
+            if (!count) { alert('앞면과 뒷면이 각각 1장 이상 필요해요.'); return; }
+            const orientation = document.getElementById('mirrorCardOrientation').value;
+            const status = document.getElementById('mirrorStatus');
+            // 파일명만 저장 — base64 변환 없음
+            const customPairs = Array.from({length: count}, (_, i) => ({
+                front: fronts[i].name,
+                back:  backs[i].name
+            }));
+            const newCard = { id: newId(), order: cardSettings.length, name, folder, orientation, totalImages: count, customPairs };
+            status.textContent = '서버에 저장 중...';
+            try {
+                await saveCards([...cardSettings, newCard]);
+                status.textContent = `✅ "${name}" 등록 완료! (${count}쌍)`;
+                setTimeout(closeMirrorModal, 1200);
+            } catch (e) {
+                status.textContent = '❌ 저장 실패: ' + e.message;
+            }
+        }
 
         // --- '전체' 버튼 ---
         document.getElementById('drawAllBtn').onclick = () => {
@@ -553,8 +809,6 @@
             initAudio();
             playSimultaneousDrawSound();
 
-            const pattern = await detectPattern(currentCard);
-
             let nums = Array.from({length: total}, (_, i) => i + 1);
             for (let i = nums.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -565,46 +819,69 @@
 
             resultArea.innerHTML = '';
             const fragment = document.createDocumentFragment();
+            const delayTime = wasDrawAll ? 0.04 : 0.02;
 
-            nums.forEach((n, index) => {
-                const container = document.createElement('div');
-                container.className = 'flip-container' + (isHorizontal ? ' horizontal' : '');
-                const delayTime = wasDrawAll ? 0.04 : 0.02;
-                container.style.animationDelay = `${index * delayTime}s`;
-
-                const frontUrl = buildFrontUrl(currentCard.folder, n, pattern);
-                const folderEnc = encodeURIComponent(currentCard.folder);
-                const backSpaced = `./${folderEnc}/뒷면%20(${n}).webp`;
-                const backNormal = `./${folderEnc}/뒷면(${n}).webp`;
-                const backPrimary = pattern === 'spaced' ? backSpaced : backNormal;
-                const backFallback = pattern === 'spaced' ? backNormal : backSpaced;
-
-                container.innerHTML = `
-                    <div class="flipper">
-                        <img src="${frontUrl}" class="card-front" decoding="async" fetchpriority="high">
-                        <img src="${backPrimary}" class="card-back" id="backImg_${n}" decoding="async"
-                             onerror="this.onerror=null; this.src='${backFallback}';">
-                    </div>
-                `;
-
-                const enableFlip = () => {
-                    container.classList.add('can-flip');
+            if (currentCard.customPairs) {
+                // 🪞 거울카드: 파일명 → GitHub URL
+                const folderEnc = encodeURIComponent(currentCard.folder || '');
+                nums.forEach((n, index) => {
+                    const pair = currentCard.customPairs[n - 1];
+                    if (!pair) return;
+                    // pair.front/back 이 base64(data:)이면 그대로, 파일명이면 폴더 URL 조합
+                    const frontSrc = pair.front.startsWith('data:') ? pair.front : `./${folderEnc}/${encodeURIComponent(pair.front)}`;
+                    const backSrc  = pair.back.startsWith('data:')  ? pair.back  : `./${folderEnc}/${encodeURIComponent(pair.back)}`;
+                    const container = document.createElement('div');
+                    container.className = 'flip-container can-flip' + (isHorizontal ? ' horizontal' : '');
+                    container.style.animationDelay = `${index * delayTime}s`;
+                    container.innerHTML = `
+                        <div class="flipper">
+                            <img src="${frontSrc}" class="card-front" decoding="async">
+                            <img src="${backSrc}"  class="card-back"  decoding="async">
+                        </div>`;
                     container.onclick = () => { playFlipSound(); container.classList.toggle('is-flipped'); };
-                };
-                const checkPrimary = new Image();
-                checkPrimary.onload = enableFlip;
-                checkPrimary.onerror = () => {
-                    const checkFallback = new Image();
-                    checkFallback.onload = enableFlip;
-                    checkFallback.onerror = () => {
-                        const el = document.getElementById(`backImg_${n}`);
-                        if(el) el.style.display = 'none';
+                    fragment.appendChild(container);
+                });
+            } else {
+                // 📁 기존 폴더 기반 카드
+                const pattern = await detectPattern(currentCard);
+                nums.forEach((n, index) => {
+                    const container = document.createElement('div');
+                    container.className = 'flip-container' + (isHorizontal ? ' horizontal' : '');
+                    container.style.animationDelay = `${index * delayTime}s`;
+
+                    const frontUrl = buildFrontUrl(currentCard.folder, n, pattern);
+                    const folderEnc = encodeURIComponent(currentCard.folder);
+                    const backSpaced = `./${folderEnc}/뒷면%20(${n}).webp`;
+                    const backNormal = `./${folderEnc}/뒷면(${n}).webp`;
+                    const backPrimary  = pattern === 'spaced' ? backSpaced : backNormal;
+                    const backFallback = pattern === 'spaced' ? backNormal : backSpaced;
+
+                    container.innerHTML = `
+                        <div class="flipper">
+                            <img src="${frontUrl}" class="card-front" decoding="async" fetchpriority="high">
+                            <img src="${backPrimary}" class="card-back" id="backImg_${n}" decoding="async"
+                                 onerror="this.onerror=null; this.src='${backFallback}';">
+                        </div>`;
+
+                    const enableFlip = () => {
+                        container.classList.add('can-flip');
+                        container.onclick = () => { playFlipSound(); container.classList.toggle('is-flipped'); };
                     };
-                    checkFallback.src = backFallback;
-                };
-                checkPrimary.src = backPrimary;
-                fragment.appendChild(container);
-            });
+                    const checkPrimary = new Image();
+                    checkPrimary.onload = enableFlip;
+                    checkPrimary.onerror = () => {
+                        const checkFallback = new Image();
+                        checkFallback.onload = enableFlip;
+                        checkFallback.onerror = () => {
+                            const el = document.getElementById(`backImg_${n}`);
+                            if(el) el.style.display = 'none';
+                        };
+                        checkFallback.src = backFallback;
+                    };
+                    checkPrimary.src = backPrimary;
+                    fragment.appendChild(container);
+                });
+            }
 
             resultArea.appendChild(fragment);
         };
