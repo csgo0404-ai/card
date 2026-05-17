@@ -230,7 +230,12 @@
 
         <main>
             <section id="studentLobby">
-                <div id="cardGrid" class="grid-container"></div>
+                <div style="display:flex; align-items:center; gap:0;">
+                    <button id="lobbyPrevBtn" onclick="lobbyChangePage(-1)" style="display:none; background:none; border:none; font-size:3rem; color:#d7ccc8; cursor:pointer; padding:0 10px; line-height:1; transition:.2s; flex-shrink:0;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#d7ccc8'">‹</button>
+                    <div id="cardGrid" class="grid-container" style="flex:1;"></div>
+                    <button id="lobbyNextBtn" onclick="lobbyChangePage(1)"  style="display:none; background:none; border:none; font-size:3rem; color:#d7ccc8; cursor:pointer; padding:0 10px; line-height:1; transition:.2s; flex-shrink:0;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#d7ccc8'">›</button>
+                </div>
+                <div id="lobbyPageInfo" style="text-align:center; color:#a1887f; font-size:1rem; margin-top:8px; display:none;"></div>
             </section>
 
             <section id="drawView" class="hidden">
@@ -375,6 +380,8 @@
         let editingId = null;
         let currentCard = null;
         let isDrawAllClicked = false;
+        let lobbyPage = 0;
+        const LOBBY_PER_PAGE = 15;
 
         // ===== IndexedDB (거울카드 로컬 저장) =====
         let _idb = null;
@@ -447,10 +454,28 @@
         reloadCards();
 
         function renderLobby() {
-            cardGrid.innerHTML = cardSettings
-                .filter(c => !c.hidden)
-                .map((c) => `<div class="card-category" onclick="startDraw('${c.id}')">${c.name}</div>`)
-                .join('');
+            const visible = cardSettings.filter(c => !c.hidden);
+            const totalPages = Math.max(1, Math.ceil(visible.length / LOBBY_PER_PAGE));
+            if (lobbyPage >= totalPages) lobbyPage = totalPages - 1;
+            const page = visible.slice(lobbyPage * LOBBY_PER_PAGE, (lobbyPage + 1) * LOBBY_PER_PAGE);
+            cardGrid.innerHTML = page.map((c) =>
+                `<div class="card-category" onclick="startDraw('${c.id}')">${c.name}</div>`
+            ).join('');
+            const usePaging = visible.length > LOBBY_PER_PAGE;
+            document.getElementById('lobbyPrevBtn').style.display = usePaging ? 'block' : 'none';
+            document.getElementById('lobbyNextBtn').style.display = usePaging ? 'block' : 'none';
+            const pageInfo = document.getElementById('lobbyPageInfo');
+            pageInfo.style.display = usePaging ? 'block' : 'none';
+            if (usePaging) pageInfo.textContent = `${lobbyPage + 1} / ${totalPages}`;
+            document.getElementById('lobbyPrevBtn').style.opacity = lobbyPage === 0 ? '0.3' : '1';
+            document.getElementById('lobbyNextBtn').style.opacity = lobbyPage === totalPages - 1 ? '0.3' : '1';
+        }
+
+        function lobbyChangePage(dir) {
+            const visible = cardSettings.filter(c => !c.hidden);
+            const totalPages = Math.ceil(visible.length / LOBBY_PER_PAGE);
+            lobbyPage = Math.max(0, Math.min(totalPages - 1, lobbyPage + dir));
+            renderLobby();
         }
 
         function renderTable() {
@@ -467,7 +492,10 @@
                             ${c.hidden ? '숨김' : '보임'}
                         </button>
                     </td>
-                    <td><button class="delete-btn" onclick="event.stopPropagation(); deleteCard('${c.id}')">삭제</button></td>
+                    <td style="white-space:nowrap;">
+                        ${c.customPairs ? `<button style="background:#7b5ea7; border:none; color:#fff; padding:5px 10px; border-radius:8px; cursor:pointer; font-family:'Jua',sans-serif; font-size:.8rem; margin-right:4px;" onclick="event.stopPropagation(); openMirrorModal('${c.id}')">짝 수정</button>` : ''}
+                        <button class="delete-btn" onclick="event.stopPropagation(); deleteCard('${c.id}')">삭제</button>
+                    </td>
                 </tr>
             `).join('');
             new Sortable(cardManageList, { handle: '.drag-handle', animation: 150, onEnd: saveNewOrder });
@@ -698,13 +726,19 @@
         document.getElementById('mirrorBatchBtn').onclick = openMirrorModal;
 
         // ===== 거울카드 일괄 등록 =====
-        let _mirrorImages = []; // [{file, dataUrl, role: 'front'|'back'|'none'}]
+        let _mirrorImages = [];
+        let _editingMirrorId = null;
 
-        function openMirrorModal() {
+        function openMirrorModal(editId = null) {
+            _editingMirrorId = editId;
             _mirrorImages = [];
-            document.getElementById('mirrorCardName').value = '';
-            document.getElementById('mirrorCardFolder').value = '';
-            document.getElementById('mirrorImgGrid').innerHTML = '';
+            const existing = editId && cardSettings.find(c => c.id === editId);
+            document.getElementById('mirrorCardName').value   = existing ? existing.name   : '';
+            document.getElementById('mirrorCardFolder').value = existing ? existing.folder : '';
+            document.getElementById('mirrorCardOrientation').value = existing ? (existing.orientation || 'vertical') : 'vertical';
+            document.getElementById('mirrorImgGrid').innerHTML = existing
+                ? `<p style="color:#bcaaa4; font-size:.9rem;">현재 ${existing.totalImages}쌍 등록됨. 아래에서 파일을 다시 선택해 짝을 수정하세요.</p>`
+                : '';
             document.getElementById('mirrorPairSection').style.display = 'none';
             document.getElementById('mirrorStatus').textContent = '';
             document.getElementById('mirrorFileInput').value = '';
@@ -807,11 +841,19 @@
                 front: fronts[i].name,
                 back:  backs[i].name
             }));
-            const newCard = { id: newId(), order: cardSettings.length, name, folder, orientation, totalImages: count, customPairs };
             status.textContent = '서버에 저장 중...';
+            let updated;
+            if (_editingMirrorId) {
+                updated = cardSettings.map(c => c.id === _editingMirrorId
+                    ? { ...c, name, folder, orientation, totalImages: count, customPairs }
+                    : c);
+            } else {
+                const newCard = { id: newId(), order: cardSettings.length, name, folder, orientation, totalImages: count, customPairs };
+                updated = [...cardSettings, newCard];
+            }
             try {
-                await saveCards([...cardSettings, newCard]);
-                status.textContent = `✅ "${name}" 등록 완료! (${count}쌍)`;
+                await saveCards(updated);
+                status.textContent = `✅ "${name}" ${_editingMirrorId ? '수정' : '등록'} 완료! (${count}쌍)`;
                 setTimeout(closeMirrorModal, 1200);
             } catch (e) {
                 status.textContent = '❌ 저장 실패: ' + e.message;
