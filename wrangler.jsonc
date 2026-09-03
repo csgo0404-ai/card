@@ -14,8 +14,12 @@
       "binding": "CARDS",
       "id": "0efacda9a5bd45f9838c01aeca965244"
     }
-  ],
-  "vars": {
-    "ADMIN_PW": "csgo10"
-  }
+  ]
+
+  // ⚠ "vars" 에 비밀번호를 두지 말 것.
+  //   assets.directory 가 "." 이라 이 파일 자체가 인터넷에 공개된다.
+  //   실제로 https://card.csgo0404.workers.dev/wrangler.jsonc 로
+  //   ADMIN_PW 가 그대로 읽혔다.
+  //   비밀번호는 대시보드 → Settings → Variables and Secrets 에 '비밀'로만 둔다.
+  //   (워커 코드는 TEACHER_PW 를 먼저 보고, 없으면 ADMIN_PW 를 본다)
 }
