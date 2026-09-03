@@ -1,7 +1,18 @@
-.git
-.git/**
+# 자산 폴더가 저장소 루트(assets.directory = ".")라
+# 여기 적지 않은 파일은 전부 인터넷에 공개된다.
+# 실제로 wrangler.jsonc 가 공개돼 비밀번호가 그대로 읽혔다.
+
+worker.js
+wrangler.jsonc
+wrangler.toml
+package.json
+package-lock.json
 node_modules
-node_modules/**
-*.log
-.wrangler
-.wrangler/**
+README.md
+.git
+.github
+.gitignore
+
+# index.html 이 실제 앱이다. 카드.html 은 같은 내용의 사본이라
+# 어느 쪽이 배포본인지 헷갈리게 만든다.
+카드.html
