@@ -1,0 +1,71 @@
+# Workers Static Assets 헤더 규칙
+# 두는 곳: 정적 자산 폴더의 최상위 (index.html 과 카드 이미지 폴더들이 있는 곳)
+#
+# 왜: 기본값이 `Cache-Control: public, max-age=0, must-revalidate` 라서
+#     브라우저에 캐시가 있어도 이미지마다 매번 재검증 요청이 나간다.
+#     100장짜리 덱에 들어갈 때마다 학생 1명당 100 요청.
+#
+# 파일명이 (1).webp 처럼 고정이라 내용이 바뀔 일이 거의 없다.
+# 그림을 교체하면 최대 7일간 옛 그림이 보일 수 있으니,
+# 교체할 때는 파일명을 바꾸거나 아래 기간을 줄인다.
+#
+# 확장자 패턴이 안 먹는 환경을 대비해 폴더별 규칙도 함께 적어 둔다.
+# 덱을 새로 추가하면 여기에 한 줄 추가할 것.
+
+/*.webp
+  Cache-Control: public, max-age=604800
+
+/감정카드/*
+  Cache-Control: public, max-age=604800
+
+/거울카드/*
+  Cache-Control: public, max-age=604800
+
+/격려카드/*
+  Cache-Control: public, max-age=604800
+
+/니즈카드/*
+  Cache-Control: public, max-age=604800
+
+/도란도란/*
+  Cache-Control: public, max-age=604800
+
+/딕싯카드/*
+  Cache-Control: public, max-age=604800
+
+/미덕의 보석/*
+  Cache-Control: public, max-age=604800
+
+/비유카드/*
+  Cache-Control: public, max-age=604800
+
+/생각카드/*
+  Cache-Control: public, max-age=604800
+
+/이야기톡(감성)/*
+  Cache-Control: public, max-age=604800
+
+/이야기톡(일상)/*
+  Cache-Control: public, max-age=604800
+
+/이야기톡(환상)/*
+  Cache-Control: public, max-age=604800
+
+/토닥토닥/*
+  Cache-Control: public, max-age=604800
+
+/트리즈카드/*
+  Cache-Control: public, max-age=604800
+
+/플립카드/*
+  Cache-Control: public, max-age=604800
+
+/해결카드/*
+  Cache-Control: public, max-age=604800
+
+# HTML 은 항상 최신을 받아야 한다(앱을 고쳐 배포했는데 옛 화면이 뜨면 안 됨).
+/
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
