@@ -248,6 +248,7 @@
             <section id="teacherView" class="hidden">
                 <div>
                     <h2 style="font-family:'Jua'; margin-top:0;">카드 설정</h2>
+                    <div id="loadWarnBar" style="display:none; background:#c62828; color:#fff; padding:12px 16px; border-radius:12px; margin-bottom:14px; font-size:1rem; line-height:1.5;"></div>
                     <div class="add-card-box">
                             <input type="text" id="newCardName" placeholder="표시 이름 (예: 도란도란)">
                             <input type="text" id="newCardFolder" placeholder="폴더명">
@@ -307,23 +308,133 @@
 // 폰트가 모두 다운로드되면 화면을 부드럽게 띄움
         document.fonts.ready.then(() => document.body.classList.add('fonts-loaded'));
         // --- 1. Cloudflare KV API ---
-        const API = 'https://card.csgo0404.workers.dev/api/cards';
+        const API_BASE = 'https://card.csgo0404.workers.dev/api';
+        const API = API_BASE + '/cards';
         let adminPw = '';
 
+        // 서버에서 한 번이라도 정상 수신했는가. 이게 false 인 동안은 저장을 금지한다.
+        // (캐시/빈 배열을 서버로 되돌려써서 전체 카드가 날아가는 사고를 막는 잠금)
+        let serverLoaded = false;
+        let lastLoadError = '';
+        let _saving = false;
+
+        // 헤더 값은 ASCII 만 실을 수 있다(한글 비밀번호를 그대로 넣으면 fetch 가 TypeError).
+        // ASCII 면 예전 그대로 보내고, 아니면 인코딩한 뒤 x-auth-enc 로 알린다.
+        function authHeaders(pw) {
+            const h = {};
+            if (/^[ -~]*$/.test(pw)) { h['x-auth'] = pw; }
+            else { h['x-auth'] = encodeURIComponent(pw); h['x-auth-enc'] = '1'; }
+            return h;
+        }
+
+        function updateSaveLock() {
+            ['addCardBtn', 'mirrorBatchBtn', 'importBtn'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.disabled = !serverLoaded;
+            });
+            const bar = document.getElementById('loadWarnBar');
+            if (!bar) return;
+            bar.style.display = serverLoaded ? 'none' : 'block';
+            if (!serverLoaded) {
+                bar.textContent = '⚠ 서버에서 카드 목록을 아직 불러오지 못했습니다. 지금 저장하면 기존 카드가 지워질 수 있어 저장을 잠갔습니다. (' + (lastLoadError || '연결 확인 중') + ')';
+            }
+        }
+
+        // 배열이기만 하면 통과시키면 안 된다 — 문자열 배열 같은 쓰레기가 들어와도
+        // serverLoaded 가 열려 저장 잠금이 풀린다. 원소 모양까지 본다.
+        function isCardArray(v) {
+            return Array.isArray(v) && v.every(c => c && typeof c === 'object' && !Array.isArray(c) && c.id);
+        }
+
+        // 마지막으로 읽은 서버본의 지문. 저장할 때 If-Match 로 되돌려 보내
+        // "내가 본 것 위에만 쓴다"를 서버가 확인하게 한다(옛 워커는 이 헤더를 무시하므로 안전).
+        let _serverEtag = '';
+
+        // 실패를 빈 배열로 둔갑시키지 않는다. 반드시 throw 해서 호출부가 캐시를 지키게 한다.
         async function fetchCards() {
             const r = await fetch(API);
-            return r.ok ? r.json() : [];
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const j = await r.json();
+            if (!isCardArray(j)) throw new Error('응답 형식 오류');
+            const etag = r.headers && r.headers.get ? (r.headers.get('etag') || '') : '';
+            return { list: j, etag };
         }
         async function saveCards(arr) {
-            const r = await fetch(API, {
-                method: 'PUT',
-                headers: { 'content-type': 'application/json', 'x-auth': adminPw },
-                body: JSON.stringify(arr)
-            });
-            if (!r.ok) { alert('저장 실패: ' + r.status); throw new Error('save failed'); }
-            // 저장 성공 시 로컬 캐시 갱신 + 화면도 즉시 다시 그림
+            if (!serverLoaded) {
+                alert('아직 서버에서 카드 목록을 불러오지 못했어요. 새로고침 후 다시 시도해 주세요.');
+                throw new Error('server not loaded');
+            }
+            if (!Array.isArray(arr)) throw new Error('bad arg');
+            if (!adminPw) {
+                alert('비밀번호가 필요합니다. ⚙ 설정을 다시 열어 입력해 주세요.');
+                throw new Error('no credential');
+            }
+            if (_saving) { alert('아직 저장 중이에요. 잠시 뒤 다시 눌러 주세요.'); throw new Error('saving in progress'); }
+            _saving = true;
+            let r;
+            try {
+                const headers = { 'content-type': 'application/json', ...authHeaders(adminPw) };
+                if (_serverEtag) headers['if-match'] = _serverEtag;
+                r = await fetch(API, {
+                    method: 'PUT',
+                    headers,
+                    body: JSON.stringify(arr)
+                });
+            } catch (e) {
+                // 연결이 끊기면 여기로 온다. 안내하지 않으면 호출부가 조용히 삼켜
+                // "눌렀는데 아무 일도 안 일어남" 이 된다.
+                alert('서버에 연결하지 못해 저장하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.');
+                throw e;
+            } finally {
+                _saving = false;
+            }
+            if (!r.ok) {
+                // 워커가 주는 error 코드로 원인을 구분한다. 숫자만 보여주면 교사가 손쓸 수가 없다.
+                let code = '';
+                try { const j = await r.json(); code = (j && j.error) || ''; } catch (e) {}
+
+                if (code === 'empty_refused') {
+                    alert('카드를 전부 지우는 저장이라 안전을 위해 막았습니다. 정말 비우려면 하나씩 삭제해 주세요.');
+                    throw new Error('empty refused');
+                }
+                if (code === 'conflict' || (r.status === 409 && !code)) {
+                    // 다른 기기/탭이 먼저 저장했다. 덮어쓰지 않고 최신본을 다시 받는다.
+                    alert('다른 기기에서 먼저 저장했어요. 최신 목록을 다시 불러옵니다. 방금 변경한 내용을 확인하고 다시 저장해 주세요.');
+                    await reloadCards();
+                    throw new Error('conflict');
+                }
+                if (r.status === 403) {
+                    adminPw = '';
+                    // 설정 화면에 남겨두면 빈 비밀번호로 계속 요청해 경고창이 반복된다.
+                    // 로비로 돌려보내 ⚙ 로 다시 입력받는다.
+                    closeMirrorModal();   // 로비 위에 모달만 남는 것을 막는다
+                    toggleView('studentLobby');
+                    mainTitle.textContent = "생각 책방";
+                    resetForm();
+                    alert('비밀번호가 맞지 않아 저장하지 못했습니다. ⚙ 설정을 다시 열어 비밀번호를 입력해 주세요.');
+                    throw new Error('forbidden');
+                }
+                if (r.status === 429) {
+                    alert('잠시 후 다시 시도해 주세요. (요청이 너무 잦습니다)');
+                    throw new Error('rate limited');
+                }
+                if (r.status === 413) {
+                    alert('저장할 내용이 너무 큽니다.');
+                    throw new Error('too large');
+                }
+                alert('저장 실패: ' + r.status + (code ? ' (' + code + ')' : ''));
+                throw new Error('save failed');
+            }
+            // 저장 응답의 지문으로 갱신해 두면, 연달아 저장할 때 다시 읽지 않아도 된다.
+            const newEtag = r.headers && r.headers.get ? r.headers.get('etag') : null;
+            _serverEtag = newEtag || '';
+            // 저장 성공 시에만 메모리/캐시에 반영한다(실패 시 롤백 불필요).
             cardSettings = arr;
-            localStorage.setItem('cookieClassCachedCards', JSON.stringify(arr));
+            try {
+                localStorage.setItem('cookieClassCachedCards', JSON.stringify(arr));
+            } catch (e) {
+                console.warn('로컬 캐시 저장 실패(서버 저장은 성공)', e);
+            }
             renderLobby();
             renderTable();
         }
@@ -371,54 +482,18 @@
             osc.start(); osc.stop(audioCtx.currentTime + 0.3);
         }
 
+        let _sortable = null;    // 표 드래그 정렬 인스턴스(렌더마다 교체)
+        let _drawToken = 0;      // 진행 중인 뽑기 식별(덱 이동·연타 시 무효화)
         let cardSettings = [];   // KV 카드 (서버)
-        let mirrorCards  = [];   // 거울카드 (IndexedDB 로컬)
         let editingId = null;
         let currentCard = null;
         let isDrawAllClicked = false;
         let lobbyPage = 0;
         const LOBBY_PER_PAGE = 10;
 
-        // ===== IndexedDB (거울카드 로컬 저장) =====
-        let _idb = null;
-        function openIDB() {
-            if (_idb) return Promise.resolve(_idb);
-            return new Promise((res, rej) => {
-                const req = indexedDB.open('mirrorCards', 1);
-                req.onupgradeneeded = e => e.target.result.createObjectStore('cards', { keyPath: 'id' });
-                req.onsuccess = e => { _idb = e.target.result; res(_idb); };
-                req.onerror   = e => rej(e.target.error);
-            });
-        }
-        async function idbGetAll() {
-            const db = await openIDB();
-            return new Promise((res, rej) => {
-                const tx = db.transaction('cards', 'readonly');
-                const req = tx.objectStore('cards').getAll();
-                req.onsuccess = e => res(e.target.result || []);
-                req.onerror   = e => rej(e.target.error);
-            });
-        }
-        async function idbPut(card) {
-            const db = await openIDB();
-            return new Promise((res, rej) => {
-                const tx = db.transaction('cards', 'readwrite');
-                tx.objectStore('cards').put(card);
-                tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
-            });
-        }
-        async function idbDelete(id) {
-            const db = await openIDB();
-            return new Promise((res, rej) => {
-                const tx = db.transaction('cards', 'readwrite');
-                tx.objectStore('cards').delete(id);
-                tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
-            });
-        }
-        async function loadMirrorCards() {
-            mirrorCards = await idbGetAll();
-            mirrorCards.sort((a, b) => (a.order || 0) - (b.order || 0));
-        }
+        // (옛 base64 거울카드용 IndexedDB 계층은 제거했다 —
+        //  지금 거울카드는 파일명만 저장하며, 이 계층은 한 번도 실행되지 않았다)
+
 
         const mainTitle = document.getElementById('mainTitle');
         const cardGrid = document.getElementById('cardGrid');
@@ -427,35 +502,114 @@
         const drawCountInput = document.getElementById('drawCount');
 
         // --- 3. 캐시 및 데이터 동기화 ---
+        // 캐시가 깨져 있어도 앱은 떠야 한다. 예전엔 여기서 throw 하면 스크립트가 통째로 죽어
+        // 로비조차 안 뜨는 백지 화면이 됐다.
         const cachedCards = localStorage.getItem('cookieClassCachedCards');
         if (cachedCards) {
-            cardSettings = JSON.parse(cachedCards);
-            cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
-            renderLobby();
-            renderTable();
+            try {
+                const parsed = JSON.parse(cachedCards);
+                if (!isCardArray(parsed)) throw new Error('캐시 형식 오류');
+                cardSettings = parsed;
+                cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
+                renderLobby();
+                renderTable();
+            } catch (e) {
+                console.warn('로컬 캐시가 손상되어 폐기합니다', e);
+                try { localStorage.removeItem('cookieClassCachedCards'); } catch (e2) {}
+                cardSettings = [];
+            }
         }
 
+        let _reloadSeq = 0;          // 응답이 순서 바뀌어 도착해도 최신만 반영한다
+        let _reloadApplied = 0;
+
         async function reloadCards() {
-            const arr = await fetchCards();
-            const fresh = Array.isArray(arr) ? arr : [];
-            fresh.sort((a, b) => (a.order || 0) - (b.order || 0));
-            const freshJson = JSON.stringify(fresh);
-            if (freshJson !== localStorage.getItem('cookieClassCachedCards')) {
-                cardSettings = fresh;
-                localStorage.setItem('cookieClassCachedCards', freshJson);
+            const seq = ++_reloadSeq;
+            let got, fresh;
+            try {
+                got = await fetchCards();
+                fresh = got.list;
+            } catch (e) {
+                // 실패 시 캐시도 화면도 절대 건드리지 않는다.
+                lastLoadError = e && e.message ? e.message : String(e);
+                console.warn('카드 목록 불러오기 실패 — 로컬 캐시 유지', e);
+                updateSaveLock();
+                renderLobby();   // 캐시가 없으면 로비가 통째로 비어 있어 안내조차 못 본다
+                return false;
             }
+            // 느린 옛 응답이 뒤늦게 도착해 최신 데이터를 덮는 것을 막는다.
+            if (seq <= _reloadApplied) {
+                console.warn('오래된 응답 무시(seq ' + seq + ' <= ' + _reloadApplied + ')');
+                return false;
+            }
+            _reloadApplied = seq;
+            _serverEtag = got.etag;   // 채택하는 응답의 지문만 신뢰한다
+
+            // 서버가 빈 배열을 주는데 우리에겐 카드가 있다면, 그대로 받아들이면 안 된다.
+            // (KV 키 유실·초기화 사고) 화면은 유지하고 저장은 잠근 채 교사에게 알린다.
+            if (fresh.length === 0 && cardSettings.length > 0) {
+                serverLoaded = false;
+                lastLoadError = '서버 목록이 비어 있음 — 기존 카드를 덮어쓰지 않도록 저장을 잠갔습니다';
+                console.warn(lastLoadError);
+                updateSaveLock();
+                return false;
+            }
+
+            fresh.sort((a, b) => (a.order || 0) - (b.order || 0));
+            cardSettings = fresh;
+            serverLoaded = true;      // 캐시 쓰기보다 먼저. setItem 이 실패해도 앱은 살아야 한다.
+            lastLoadError = '';
+            const freshJson = JSON.stringify(fresh);
+            try {
+                if (freshJson !== localStorage.getItem('cookieClassCachedCards')) {
+                    localStorage.setItem('cookieClassCachedCards', freshJson);
+                }
+            } catch (e) {
+                // 용량초과·사파리 프라이빗·저장차단. 캐시는 포기하되 동작은 계속한다.
+                console.warn('로컬 캐시 저장 실패(무시하고 진행)', e);
+            }
+            updateSaveLock();
             renderLobby();
             renderTable();
+            return true;
         }
+        updateSaveLock();
         reloadCards();
+
+        // 카드 이름·폴더명은 서버(KV)에서 오고, 비밀번호를 아는 누구나 바꿀 수 있다.
+        // 이스케이프 없이 innerHTML 에 넣으면 이름 하나로 전교생 브라우저에서 코드가 실행된다.
+        function esc(v) {
+            return String(v == null ? '' : v)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
 
         function renderLobby() {
             const visible = cardSettings.filter(c => !c.hidden);
             const totalPages = Math.max(1, Math.ceil(visible.length / LOBBY_PER_PAGE));
             if (lobbyPage >= totalPages) lobbyPage = totalPages - 1;
             const page = visible.slice(lobbyPage * LOBBY_PER_PAGE, (lobbyPage + 1) * LOBBY_PER_PAGE);
+
+            if (visible.length === 0) {
+                // 왜 비었는지 알려준다. 아무 말 없이 빈 책장만 보이면 학생도 교사도 원인을 모른다.
+                const msg = !serverLoaded
+                    ? '지금 카드 목록을 불러오지 못했어요.<br>인터넷 연결을 확인하고 새로고침해 주세요.'
+                    : (cardSettings.length === 0
+                        ? '아직 준비된 카드가 없어요.<br>선생님께 알려 주세요.'
+                        : '지금은 열어 둔 카드가 없어요.<br>선생님께 알려 주세요.');
+                cardGrid.innerHTML =
+                    `<div style="grid-column:1/-1; align-self:center; text-align:center; color:#f4ece1;
+                                 font-size:2rem; line-height:1.6; padding:40px 20px; text-shadow:1px 1px 3px rgba(0,0,0,.5);">
+                        ${msg}
+                     </div>`;
+                document.getElementById('lobbyPrevBtn').style.display = 'none';
+                document.getElementById('lobbyNextBtn').style.display = 'none';
+                return;
+            }
+
+            // onclick 에 id 를 문자열로 끼워 넣지 않는다(따옴표가 든 id 가 속성을 깨뜨렸다).
             cardGrid.innerHTML = page.map(c =>
-                `<div class="card-category" onclick="startDraw('${c.id}')">${c.name}</div>`
+                `<div class="card-category" data-id="${esc(c.id)}">${esc(c.name)}</div>`
             ).join('');
             const usePaging = visible.length > LOBBY_PER_PAGE;
             document.getElementById('lobbyPrevBtn').style.display = usePaging ? 'block' : 'none';
@@ -463,6 +617,23 @@
             document.getElementById('lobbyPrevBtn').style.opacity = lobbyPage === 0 ? '0.3' : '1';
             document.getElementById('lobbyNextBtn').style.opacity = lobbyPage === totalPages - 1 ? '0.3' : '1';
         }
+
+        // 로비/표의 클릭은 위임으로 처리한다(핸들러 중복 부착 없음, 주입 경로 없음).
+        cardGrid.addEventListener('click', e => {
+            const el = e.target.closest('.card-category');
+            if (el && el.dataset.id) startDraw(el.dataset.id);
+        });
+        cardManageList.addEventListener('click', e => {
+            const tr = e.target.closest('tr');
+            if (!tr || !tr.dataset.id) return;
+            const id = tr.dataset.id;
+            const btn = e.target.closest('button[data-act]');
+            if (!btn) { startEdit(id); return; }
+            e.stopPropagation();
+            if (btn.dataset.act === 'hide')  toggleCardHidden(id);
+            else if (btn.dataset.act === 'pairs') openMirrorModal(id);
+            else if (btn.dataset.act === 'del')   deleteCard(id);
+        });
 
         function lobbyChangePage(dir) {
             const visible = cardSettings.filter(c => !c.hidden);
@@ -472,42 +643,45 @@
         }
 
         function renderTable() {
+            // 렌더마다 Sortable 이 쌓이면 드래그 한 번에 저장이 여러 번 나간다.
+            if (_sortable) { try { _sortable.destroy(); } catch (e) {} _sortable = null; }
             cardManageList.innerHTML = cardSettings.map((c) => `
-                <tr data-id="${c.id}" onclick="startEdit('${c.id}')" style="${c.hidden ? 'opacity:.5;' : ''}">
+                <tr data-id="${esc(c.id)}" style="${c.hidden ? 'opacity:.5;' : ''}">
                     <td class="drag-handle">☰</td>
-                    <td>${c.name}</td>
-                    <td>${c.folder || ''}</td>
+                    <td>${esc(c.name)}</td>
+                    <td>${esc(c.folder || '')}</td>
                     <td><span style="background:${c.customPairs ? '#7b5ea7' : '#8d6e63'}; padding:3px 8px; border-radius:10px; font-size:0.9rem;">${c.orientation === 'horizontal' ? '가로 ↔' : '세로 ↕'}</span></td>
-                    <td>${c.totalImages}장</td>
+                    <td>${esc(c.totalImages)}장</td>
                     <td style="text-align:center;">
-                        <button onclick="event.stopPropagation(); toggleCardHidden('${c.id}')"
+                        <button data-act="hide"
                             style="background:${c.hidden ? '#6d4c41' : '#66bb6a'}; border:none; color:#fff; padding:5px 12px; border-radius:10px; cursor:pointer; font-family:'Jua',sans-serif; font-size:.85rem;">
                             ${c.hidden ? '숨김' : '보임'}
                         </button>
                     </td>
                     <td style="white-space:nowrap;">
-                        ${c.customPairs ? `<button style="background:#7b5ea7; border:none; color:#fff; padding:5px 10px; border-radius:8px; cursor:pointer; font-family:'Jua',sans-serif; font-size:.8rem; margin-right:4px;" onclick="event.stopPropagation(); openMirrorModal('${c.id}')">짝 수정</button>` : ''}
-                        <button class="delete-btn" onclick="event.stopPropagation(); deleteCard('${c.id}')">삭제</button>
+                        ${c.customPairs ? `<button data-act="pairs" style="background:#7b5ea7; border:none; color:#fff; padding:5px 10px; border-radius:8px; cursor:pointer; font-family:'Jua',sans-serif; font-size:.8rem; margin-right:4px;">짝 수정</button>` : ''}
+                        <button class="delete-btn" data-act="del">삭제</button>
                     </td>
                 </tr>
             `).join('');
-            new Sortable(cardManageList, { handle: '.drag-handle', animation: 150, onEnd: saveNewOrder });
+            _sortable = new Sortable(cardManageList, { handle: '.drag-handle', animation: 150, onEnd: saveNewOrder });
         }
 
         async function toggleCardHidden(id) {
-            const c = cardSettings.find(c => c.id === id);
-            if (!c) return;
-            c.hidden = !c.hidden;
-            await saveCards(cardSettings);
+            if (!cardSettings.some(c => c.id === id)) return;
+            // 원본을 먼저 고치지 않는다 — 저장이 실패해도 '유령 변경'이 남지 않게.
+            const next = cardSettings.map(c => c.id === id ? { ...c, hidden: !c.hidden } : c);
+            try { await saveCards(next); } catch (e) { renderTable(); }
         }
 
         async function saveNewOrder() {
             const rows = [...cardManageList.querySelectorAll('tr')];
             const idOrder = new Map(rows.map((row, index) => [row.getAttribute('data-id'), index]));
-            cardSettings.forEach(c => { if (idOrder.has(c.id)) c.order = idOrder.get(c.id); });
-            cardSettings.sort((a, b) => (a.order || 0) - (b.order || 0));
-            await saveCards(cardSettings);
-            await reloadCards();
+            const next = cardSettings
+                .map(c => idOrder.has(c.id) ? { ...c, order: idOrder.get(c.id) } : { ...c })
+                .sort((a, b) => (a.order || 0) - (b.order || 0));
+            // 실패하면 화면 순서를 서버/메모리 기준으로 되돌린다.
+            try { await saveCards(next); } catch (e) { renderTable(); }
         }
 
         function toggleView(viewId) {
@@ -522,10 +696,17 @@
 
         // --- 4. 대기 화면 설정 및 강력한 Preload ---
         function startDraw(id) {
-            currentCard = cardSettings.find(c => c.id === id);
+            const found = cardSettings.find(c => c.id === id);
+            if (!found) { renderLobby(); return; }
+            if (needsFolder(found) && !deckFolder(found)) {
+                alert('이 카드에 폴더가 지정되지 않았습니다. 선생님께 알려 주세요.');
+                return;
+            }
+            _drawToken++;   // 이전 덱의 진행 중인 뽑기를 버린다
+            currentCard = found;
             mainTitle.textContent = currentCard.name;
             drawCountInput.value = 1; 
-            drawCountInput.max = currentCard.totalImages; 
+            drawCountInput.max = deckSize(currentCard); 
             
             toggleView('drawView');
             updatePlaceholders(); 
@@ -538,32 +719,98 @@
         function getPatternKey(folder) { return 'cardPattern_' + folder; }
         function getCachedPattern(folder) { return localStorage.getItem(getPatternKey(folder)); }
         function setCachedPattern(folder, p) { localStorage.setItem(getPatternKey(folder), p); }
+        // 뒷면은 앞면과 규칙이 다를 수 있다(감정카드: 앞 plain / 뒤 spaced).
+        function getBackKey(folder) { return 'cardBackPattern_' + folder; }
+        function getCachedBack(folder) { return localStorage.getItem(getBackKey(folder)); }
+        function setCachedBack(folder, p) { localStorage.setItem(getBackKey(folder), p); }
 
-        // 패턴 감지: 첫 이미지가 어느 URL로 로드되는지 확인 (1회 요청)
-        function detectPattern(card) {
-            const cached = getCachedPattern(card.folder);
-            if (cached) return Promise.resolve(cached);
-            const folderEncoded = encodeURIComponent(card.folder);
+        // 패턴 감지: 실제로 '로드에 성공한' 쪽만 캐시한다.
+        // 예전 코드는 첫 요청 실패(오프라인·일시 404)를 곧바로 'plain' 으로 영구 저장해서
+        // 그 기기에서는 해당 덱이 영원히 안 뜨는 상태로 굳어버렸다.
+        function _probeImg(url) {
             return new Promise(resolve => {
                 const img = new Image();
-                img.onload = () => { setCachedPattern(card.folder, 'spaced'); resolve('spaced'); };
-                img.onerror = () => { setCachedPattern(card.folder, 'plain'); resolve('plain'); };
-                img.src = `./${folderEncoded}/%20(1).webp`;
+                img.onload = () => resolve(true);
+                img.onerror = () => resolve(false);
+                img.src = url;
             });
+        }
+        async function detectPattern(card) {
+            const folder = deckFolder(card);
+            if (!folder) return 'plain';   // 확인할 경로가 없으면 요청을 만들지 않는다
+            const cached = getCachedPattern(folder);
+            if (cached) return cached;
+            const f = encodeURIComponent(folder);
+            if (await _probeImg(`./${f}/%20(1).webp`)) {
+                setCachedPattern(folder, 'spaced');
+                return 'spaced';
+            }
+            if (await _probeImg(`./${f}/(1).webp`)) {
+                setCachedPattern(folder, 'plain');
+                return 'plain';
+            }
+            return 'plain';   // 둘 다 확인 실패 — 캐시하지 않는다(다음 진입 때 재시도)
+        }
+
+        // 뒷면 패턴을 폴더당 딱 한 번 확인해 캐시한다.
+        // 'none' 은 뒷면이 아예 없다는 뜻(hasBack 이 없는 옛 카드용).
+        async function detectBackPattern(folder, frontPattern, knownHasBack) {
+            if (!folder) return 'none';
+            const cached = getCachedBack(folder);
+            if (cached) return cached;
+            const f = encodeURIComponent(folder);
+            if (await _probeImg(`./${f}/뒷면%20(1).webp`)) { setCachedBack(folder, 'spaced'); return 'spaced'; }
+            if (await _probeImg(`./${f}/뒷면(1).webp`))    { setCachedBack(folder, 'plain');  return 'plain';  }
+
+            // 둘 다 실패했다. '뒷면이 없다' 와 '지금 네트워크가 안 된다' 를 구분해야 한다.
+            // 앞면 패턴에서 겪었던 그 사고 — 일시 장애를 영구 캐시하면 회복할 길이 없다.
+            if (knownHasBack) return 'none';   // 서버가 있다고 했으니 캐시하지 않는다(다음에 재시도)
+            const reachable = await _probeImg(buildFrontUrl(folder, 1, frontPattern));
+            if (reachable) setCachedBack(folder, 'none');   // 폴더는 멀쩡한데 뒷면만 없다 → 확정
+            return 'none';
         }
 
         function buildFrontUrl(folder, n, pattern) {
             const f = encodeURIComponent(folder);
             return pattern === 'spaced' ? `./${f}/%20(${n}).webp` : `./${f}/(${n}).webp`;
         }
+        // 서버 데이터의 hasBack 을 실제로 사용한다(문자열 'false'/'true' 로 저장돼 있다).
+        // 값이 없는 옛 카드만 예전처럼 요청해 보고 판단한다.
+        function cardHasBack(card) {
+            const v = card && card.hasBack;
+            if (v === false || v === 'false') return false;
+            if (v === true  || v === 'true')  return true;
+            return true;   // 미지정 = 알 수 없음 → 종전대로 시도
+        }
         function buildBackUrl(folder, n, pattern) {
             const f = encodeURIComponent(folder);
             return pattern === 'spaced' ? `./${f}/뒷면%20(${n}).webp` : `./${f}/뒷면(${n}).webp`;
         }
 
-        // 브라우저 렉 방지용 강력한 이미지 미리 불러오기 함수
+        // 이미지 미리 불러오기 — 동시 6장씩 순차 큐.
+        // 예전에는 100장을 한 번에 요청해서 저사양 기기가 멎고, 덱을 빠르게 갈아타면
+        // 취소되지 않은 요청이 계속 쌓였다. 토큰으로 이전 덱의 큐를 중단시킨다.
+        let _preloadToken = 0;
+        const PRELOAD_CONCURRENCY = 6;
+        // 미리 받아 둘 총 픽셀 예산(약 24MP ≈ 디코딩 96MB). 그림이 클수록 적게 받는다.
+        const PRELOAD_PIXEL_BUDGET = 24 * 1000 * 1000;
+        const PRELOAD_FALLBACK_COUNT = 12;
+        // 이 장수를 넘겨 뽑으면 화면 밖 카드는 지연 로딩한다(한 화면에 대략 이 정도가 들어간다)
+        const LAZY_THRESHOLD = 10;
+
+        // 미리 받아 둔 이미지를 놓아준다. 토큰은 '더 받지 마라'일 뿐이라
+        // 이미 받은 것들은 이 영역에 남아 디코딩된 메모리를 계속 차지한다.
+        function clearPreload() {
+            const d = document.getElementById('hidden-preload-area');
+            if (d) d.innerHTML = '';
+        }
+
         async function preloadImages(card) {
+            const myToken = ++_preloadToken;
+            const folder = deckFolder(card);   // 탐지·요청 모두 이 값 하나만 쓴다
+            if (!folder) return;               // 경로가 없으면 미리 받을 것도 없다
             const pattern = await detectPattern(card);
+            if (myToken !== _preloadToken) return;   // 그 사이 다른 덱으로 이동
 
             let hiddenDiv = document.getElementById('hidden-preload-area');
             if(!hiddenDiv) {
@@ -574,13 +821,44 @@
             }
             hiddenDiv.innerHTML = '';
 
-            for(let i = 1; i <= card.totalImages; i++) {
-                const img = new Image();
-                img.src = buildFrontUrl(card.folder, i, pattern);
-                img.decoding = 'async';
-                img.fetchPriority = 'high';
-                hiddenDiv.appendChild(img);
-            }
+            const total = deckSize(card);
+
+            // 저사양 태블릿에서 진짜 위험한 건 전송량이 아니라 '디코딩된 메모리'다.
+            // 1760x2527 짜리 그림 한 장은 화면에 작게 보여도 메모리에서는 약 17MB 를 쓴다.
+            // 덱 전체를 미리 받으면 수백 MB 를 한꺼번에 디코딩하려다 탭이 죽는다.
+            // 그림 자체는 손대지 않고, '미리 받는 장수'만 그림 크기에 맞춰 줄인다.
+            const first = new Image();
+            first.decoding = 'async';
+            await new Promise(res => {
+                first.onload = res; first.onerror = res;
+                first.src = buildFrontUrl(folder, 1, pattern);
+                hiddenDiv.appendChild(first);
+            });
+            if (myToken !== _preloadToken) return;
+
+            const px = (first.naturalWidth || 0) * (first.naturalHeight || 0);
+            // 크기를 알 수 없으면(오래된 브라우저 등) 보수적으로 조금만 받는다.
+            const budget = px > 0
+                ? Math.floor(PRELOAD_PIXEL_BUDGET / px)
+                : PRELOAD_FALLBACK_COUNT;
+            const limit = Math.max(1, Math.min(total, budget));
+
+            let next = 2;   // 1번은 위에서 이미 받았다
+            const runner = () => new Promise(done => {
+                const step = () => {
+                    if (myToken !== _preloadToken || next > limit) return done();
+                    const n = next++;
+                    const img = new Image();
+                    img.decoding = 'async';
+                    img.onload = step;
+                    img.onerror = step;
+                    img.src = buildFrontUrl(folder, n, pattern);
+                    hiddenDiv.appendChild(img);
+                };
+                step();
+            });
+            const lanes = Math.max(1, Math.min(PRELOAD_CONCURRENCY, limit - 1));
+            if (limit > 1) await Promise.all(Array.from({ length: lanes }, runner));
         }
 
         drawCountInput.addEventListener('input', updatePlaceholders);
@@ -589,7 +867,7 @@
             if(!currentCard) return;
             let count = parseInt(drawCountInput.value);
             if(isNaN(count) || count < 1) count = 1;
-            if(count > currentCard.totalImages) count = currentCard.totalImages;
+            if(count > deckSize(currentCard)) count = deckSize(currentCard);
 
             resultArea.innerHTML = '';
             if(count > 10) resultArea.classList.add('draw-all-mode');
@@ -611,46 +889,76 @@
             }
         }
 
-        // 🔒 비밀번호 설정 (csgo10)
-        document.getElementById('goTeacherBtn').onclick = () => {
+        // 🔒 비밀번호는 소스에 두지 않는다. 정답은 Cloudflare 시크릿(TEACHER_PW)만 알고,
+        //    맞는지는 워커가 판정한다. 예전엔 여기에 정답이 적혀 있어 학생이 소스보기만 해도 알 수 있었다.
+        document.getElementById('goTeacherBtn').onclick = async () => {
             const pw = prompt("비밀번호를 입력하세요.");
-            if (pw !== "csgo10") {
-                alert("비밀번호가 일치하지 않습니다.");
-                return;
+            if (!pw) return;
+            let allow = false, offline = false;
+            try {
+                const r = await fetch(API_BASE + '/auth', { headers: authHeaders(pw) });
+                if (r.status === 404) {
+                    // 판정 엔드포인트가 없는 옛 워커에서만 통과시킨다(잠금 방지).
+                    allow = true;
+                } else if (r.status === 429) {
+                    alert('비밀번호 시도가 너무 잦습니다. 잠시 후 다시 해 주세요.');
+                    return;
+                } else {
+                    allow = r.ok;
+                }
+            } catch (e) {
+                // 네트워크 오류를 통과로 취급하면, 요청을 일부러 끊어 교사 화면에 들어올 수 있다.
+                offline = true;
             }
+            if (offline) { alert('서버에 연결하지 못해 확인할 수 없습니다. 연결을 확인하고 다시 시도해 주세요.'); return; }
+            if (!allow) { alert("비밀번호가 일치하지 않습니다."); return; }
             adminPw = pw;
             toggleView('teacherView');
             mainTitle.textContent = "카드 설정";
+            if (!serverLoaded) reloadCards();
         };
-        document.getElementById('backBtn').onclick = () => { toggleView('studentLobby'); mainTitle.textContent = "생각 책방"; resetForm(); };
+        document.getElementById('backBtn').onclick = () => {
+            _drawToken++;   // 로비로 나가면 진행 중인 뽑기도 버린다
+            _preloadToken++;
+            clearPreload();
+            resultArea.innerHTML = '';   // 뽑아 놓은 카드도 놓아준다(전체 100장이면 수백 MB)
+            toggleView('studentLobby'); mainTitle.textContent = "생각 책방"; resetForm();
+        };
 
         document.getElementById('addCardBtn').onclick = async () => {
             const name = document.getElementById('newCardName').value.trim();
             const editingCard = editingId && cardSettings.find(c => c.id === editingId);
+            if (editingId && !editingCard) {
+                alert('수정하려던 카드가 사라졌어요. 목록을 새로 불러옵니다.');
+                resetForm();
+                reloadCards();
+                return;
+            }
+            let next;
             if (editingCard && editingCard.customPairs) {
                 // 거울카드: 이름만 수정
                 if (!name) return alert("이름을 입력해 주세요!");
-                editingCard.name = name;
+                next = cardSettings.map(c => c.id === editingId ? { ...c, name } : c);
             } else {
                 const folder = document.getElementById('newCardFolder').value.trim();
                 const orientation = document.getElementById('newCardOrientation').value;
-                const total = document.getElementById('newCardTotal').value;
+                const total = parseInt(document.getElementById('newCardTotal').value);
                 if (!name || !folder || !total) return alert("내용을 모두 채워주세요!");
-                const payload = { name, folder, orientation, totalImages: parseInt(total) };
+                if (!(total > 0)) return alert("장수는 1 이상이어야 해요!");
+                const payload = { name, folder, orientation, totalImages: total };
                 if (editingId) {
-                    const idx = cardSettings.findIndex(c => c.id === editingId);
-                    if (idx >= 0) cardSettings[idx] = { ...cardSettings[idx], ...payload };
+                    next = cardSettings.map(c => c.id === editingId ? { ...c, ...payload } : c);
                 } else {
-                    cardSettings.push({ id: newId(), order: cardSettings.length, ...payload });
+                    next = [...cardSettings, { id: newId(), order: cardSettings.length, ...payload }];
                 }
             }
-            await saveCards(cardSettings);
-            await reloadCards();
+            try { await saveCards(next); } catch (e) { return; }
             resetForm();
         };
 
         function startEdit(id) {
             const c = cardSettings.find(card => card.id === id);
+            if (!c) return;   // 동시 갱신으로 사라진 행을 눌렀을 때
             editingId = id;
             document.getElementById('newCardName').value = c.name;
             const isMirror = !!c.customPairs;
@@ -689,41 +997,98 @@
         document.getElementById('importFile').onchange = async (e) => {
             const file = e.target.files[0];
             if (!file) return;
+
+            // 파일 해석과 서버 저장을 한 catch 로 묶으면, 저장이 403 으로 막혀도
+            // "파일이 잘못됐다" 고 안내해 원인을 못 찾는다. 두 단계를 분리한다.
+            let clean, dropped, dupFixed;
             try {
                 const text = await file.text();
                 const parsed = JSON.parse(text);
                 if (!Array.isArray(parsed)) throw new Error();
-                if (!confirm(`${parsed.length}개의 카드 설정을 불러옵니다. 기존 설정을 덮어씁니다.`)) return;
-                await saveCards(parsed);
-                alert('불러오기 완료!');
+                const seen = new Set();
+                dupFixed = 0;
+                clean = parsed
+                    .filter(c => c && typeof c === 'object' && typeof c.name === 'string' && c.name.trim())
+                    .map((c, i) => {
+                        // id 가 겹치면 뒤 카드는 영영 열 수 없다(모든 조회가 find 로 앞의 것만 잡는다).
+                        let id = c.id || newId();
+                        if (seen.has(id)) { id = newId(); dupFixed++; }
+                        seen.add(id);
+
+                        const out = { ...c, id, order: typeof c.order === 'number' ? c.order : i };
+                        out.folder = deckFolder(c);
+
+                        if (Array.isArray(c.customPairs)) {
+                            // 짝이 문자열이 아니면 뽑기에서 startsWith 로 죽는다. 여기서 걸러낸다.
+                            out.customPairs = c.customPairs.filter(validPair);
+                            out.totalImages = out.customPairs.length;
+                        } else {
+                            out.totalImages = parseInt(c.totalImages) || 0;
+                        }
+                        return out;
+                    })
+                    // 쓸 수 있는 카드만 남긴다: 그림이 있고, 그림을 찾아갈 경로가 있어야 한다.
+                    .filter(c => {
+                        if (c.totalImages <= 0) return false;
+                        if (c.customPairs) {
+                            return c.customPairs.every(p => p.front.startsWith('data:')) || !!c.folder;
+                        }
+                        return !!c.folder;
+                    });
+                if (!clean.length) throw new Error();
+                dropped = parsed.length - clean.length;
             } catch {
                 alert('올바른 카드 설정 파일이 아닙니다.');
+                e.target.value = '';
+                return;
+            }
+
+            const notes = [];
+            if (dropped)  notes.push(`형식이 잘못된 ${dropped}개는 제외`);
+            if (dupFixed) notes.push(`번호가 겹친 ${dupFixed}개는 새 번호로`);
+            const warn = notes.length ? ` (${notes.join(', ')})` : '';
+            if (!confirm(`${clean.length}개의 카드 설정을 불러옵니다. 기존 설정을 덮어씁니다.${warn}`)) {
+                e.target.value = '';
+                return;
+            }
+
+            try {
+                await saveCards(clean);
+                alert('불러오기 완료!');
+            } catch (err) {
+                // saveCards 가 이미 원인에 맞는 안내를 띄웠다. 파일 탓으로 돌리지 않는다.
             }
             e.target.value = '';
         };
 
         window.deleteCard = async (id) => {
             if(!confirm("삭제할까요?")) return;
-            cardSettings = cardSettings.filter(c => c.id !== id);
-            await saveCards(cardSettings);
-            await reloadCards();
+            const next = cardSettings.filter(c => c.id !== id);
+            if (next.length === cardSettings.length) return;
+            try { await saveCards(next); } catch (e) {}
         };
 
         // 🪞 거울카드: preload 스킵
         const _origPreload = preloadImages;
         preloadImages = async (card) => {
-            if (card.customPairs) return; // base64 이미 메모리에 있음
+            if (card.customPairs) {
+                _preloadToken++;   // 직전 덱의 다운로드 큐를 반드시 멈춘다
+                clearPreload();    // 직전 덱 이미지도 놓아준다
+                return;
+            }
             return _origPreload(card);
         };
 
-        document.getElementById('mirrorBatchBtn').onclick = openMirrorModal;
+        document.getElementById('mirrorBatchBtn').onclick = () => openMirrorModal(null);
 
         // ===== 거울카드 일괄 등록 =====
         let _mirrorImages = [];
         let _editingMirrorId = null;
 
         function openMirrorModal(editId = null) {
-            _editingMirrorId = editId;
+            // 문자열 id 만 '수정'으로 인정한다(이벤트 객체 등이 새면 신규 등록이 증발한다).
+            _editingMirrorId = (typeof editId === 'string' && editId) ? editId : null;
+            editId = _editingMirrorId;
             _mirrorImages = [];
             const existing = editId && cardSettings.find(c => c.id === editId);
             document.getElementById('mirrorCardName').value   = existing ? existing.name   : '';
@@ -739,6 +1104,11 @@
         }
         function closeMirrorModal() {
             document.getElementById('mirrorModal').style.display = 'none';
+            // blob URL 을 놓아주지 않으면 모달을 여닫을수록 메모리가 계속 쌓인다.
+            _mirrorImages.forEach(m => { if (m.blobUrl) URL.revokeObjectURL(m.blobUrl); });
+            _mirrorImages = [];
+            document.getElementById('mirrorImgGrid').innerHTML = '';
+            document.getElementById('mirrorPairSection').style.display = 'none';
         }
         document.getElementById('mirrorModal').addEventListener('click', e => {
             if (e.target === document.getElementById('mirrorModal')) closeMirrorModal();
@@ -800,23 +1170,6 @@
                 </div>`).join('');
         }
 
-        async function resizeToDataUrl(dataUrl, maxPx = 900, quality = 0.82) {
-            return new Promise(res => {
-                const img = new Image();
-                img.onload = () => {
-                    let { width: w, height: h } = img;
-                    if (w > maxPx || h > maxPx) {
-                        const ratio = Math.min(maxPx / w, maxPx / h);
-                        w = Math.round(w * ratio); h = Math.round(h * ratio);
-                    }
-                    const cv = document.createElement('canvas');
-                    cv.width = w; cv.height = h;
-                    cv.getContext('2d').drawImage(img, 0, 0, w, h);
-                    res(cv.toDataURL('image/jpeg', quality));
-                };
-                img.src = dataUrl;
-            });
-        }
 
         async function saveMirrorCard() {
             const name   = document.getElementById('mirrorCardName').value.trim();
@@ -836,6 +1189,10 @@
             }));
             status.textContent = '서버에 저장 중...';
             let updated;
+            if (_editingMirrorId && !cardSettings.some(c => c.id === _editingMirrorId)) {
+                status.textContent = '❌ 수정하려던 카드를 찾을 수 없습니다. 창을 닫고 다시 시도해 주세요.';
+                return;
+            }
             if (_editingMirrorId) {
                 updated = cardSettings.map(c => c.id === _editingMirrorId
                     ? { ...c, name, folder, orientation, totalImages: count, customPairs }
@@ -856,7 +1213,7 @@
         // --- '전체' 버튼 ---
         document.getElementById('drawAllBtn').onclick = () => {
             if(!currentCard) return;
-            drawCountInput.value = currentCard.totalImages;
+            drawCountInput.value = deckSize(currentCard);
             
             // 🔥 전체 버튼을 눌렀다는 플래그를 저장합니다 (애니메이션 딜레이 조절용)
             isDrawAllClicked = true;
@@ -864,11 +1221,77 @@
         };
 
         // --- 5. 🃏 렉 없는 동시 애니메이션 (시간차 부여 & Async 적용) ---
+        // 거울카드는 totalImages 와 실제 짝 수가 어긋날 수 있다(짝 수정 중 파일을 덜 지정한 경우).
+        // 그때 예전에는 요청한 장수보다 조용히 적게 나왔다 — 실제 개수를 진실로 삼는다.
+        // 불러온 파일이나 옛 데이터에는 폴더가 없거나 짝이 문자열이 아닐 수 있다.
+        // 그대로 두면 './undefined/...' 로 요청이 나가거나(전부 404) startsWith 에서 죽는다.
+        function deckFolder(card) {
+            const f = card && card.folder;
+            return (typeof f === 'string' && f.trim()) ? f.trim() : '';
+        }
+        function validPair(p) {
+            return p && typeof p.front === 'string' && typeof p.back === 'string';
+        }
+
+        function needsFolder(card) {
+            if (!card) return false;
+            if (!Array.isArray(card.customPairs)) return true;
+            const pairs = usablePairs(card);
+            if (!pairs.length) return false;   // 그릴 게 없으면 deckSize 0 으로 따로 걸린다
+            return !pairs.every(p => p.front.startsWith('data:') && p.back.startsWith('data:'));
+        }
+
+        // 그릴 수 있는 짝만 남긴다. 세는 기준과 그리는 기준이 다르면
+        // 요청한 장수보다 조용히 적게 나온다.
+        function usablePairs(card) {
+            return (card && Array.isArray(card.customPairs))
+                ? card.customPairs.filter(validPair)
+                : [];
+        }
+
+        // 앞면을 못 받은 카드는 깨진 아이콘 대신 '?' 자리표시로 바꾼다.
+        // 뒤집기도 끄고, 몇 번 그림이 없는지 콘솔에 남겨 교사가 찾을 수 있게 한다.
+        function markMissingFront(container, url) {
+            container.dataset.missing = '1';   // 뒤늦게 오는 뒷면 onload 를 막는 표시
+            container.classList.remove('can-flip');
+            container.classList.add('placeholder-card');
+            container.onclick = null;
+            container.innerHTML = '<div class="flipper"><div class="card-front"><span class="q-mark">?</span></div></div>';
+            console.warn('그림을 찾을 수 없습니다:', url);
+        }
+
+        function deckSize(card) {
+            if (!card) return 0;
+            if (card.customPairs) return Math.min(card.totalImages || 0, usablePairs(card).length);
+            return card.totalImages || 0;
+        }
+
         document.getElementById('drawBtn').onclick = async () => {
+            if (!currentCard) return;
+            const myDraw = ++_drawToken;
             let count = parseInt(drawCountInput.value);
-            const total = currentCard.totalImages;
+            if (isNaN(count) || count < 1) count = 1;
+            const declared = currentCard.totalImages || 0;
+            const total = deckSize(currentCard);
+            if (total === 0) { alert('이 카드에는 그림이 없습니다. 선생님께 알려 주세요.'); return; }
+            const folder = deckFolder(currentCard);   // 이 뽑기 전체가 이 값 하나만 쓴다
+            if (needsFolder(currentCard) && !folder) {
+                alert('이 카드에 폴더가 지정되지 않았습니다. 선생님께 알려 주세요.');
+                return;
+            }
+            if (count > total) {
+                count = total;
+                drawCountInput.value = String(total);   // 입력칸도 정리해 같은 안내가 반복되지 않게
+                // 실제 장수가 덱이 말한 것보다 적다면 데이터 문제다. 그때만 알린다.
+                if (total < declared) alert(`이 카드는 ${total}장까지만 있어요.`);
+            }
             const isHorizontal = currentCard.orientation === 'horizontal';
             const wasDrawAll = isDrawAllClicked;
+            // 많이 뽑을 때는 화면 밖 카드의 다운로드·디코딩을 스크롤 시점까지 미룬다.
+            // (한 장은 커도 상관없지만 40~100장이 동시에 디코딩되면 태블릿이 죽는다)
+            // 많이 뽑으면 지연 로딩, 적게 뽑으면 우선 로딩. 둘은 서로 배타적이다.
+            const lazyAttr = count > LAZY_THRESHOLD ? ' loading="lazy"' : '';
+            const frontAttr = lazyAttr || ' fetchpriority="high"';
 
             if(isDrawAllClicked || count > 10) resultArea.classList.add('draw-all-mode');
             else resultArea.classList.remove('draw-all-mode');
@@ -891,10 +1314,12 @@
 
             if (currentCard.customPairs) {
                 // 🪞 거울카드: 파일명 → GitHub URL
-                const folderEnc = encodeURIComponent(currentCard.folder || '');
+                const folderEnc = encodeURIComponent(folder);
+                const pairs = usablePairs(currentCard);   // 세는 기준과 같은 목록에서 뽑는다
                 nums.forEach((n, index) => {
-                    const pair = currentCard.customPairs[n - 1];
+                    const pair = pairs[n - 1];
                     if (!pair) return;
+                    if (!pair.front.startsWith('data:') && !folderEnc) return;
                     // pair.front/back 이 base64(data:)이면 그대로, 파일명이면 폴더 URL 조합
                     const frontSrc = pair.front.startsWith('data:') ? pair.front : `./${folderEnc}/${encodeURIComponent(pair.front)}`;
                     const backSrc  = pair.back.startsWith('data:')  ? pair.back  : `./${folderEnc}/${encodeURIComponent(pair.back)}`;
@@ -903,54 +1328,70 @@
                     container.style.animationDelay = `${index * delayTime}s`;
                     container.innerHTML = `
                         <div class="flipper">
-                            <img src="${frontSrc}" class="card-front" decoding="async">
-                            <img src="${backSrc}"  class="card-back"  decoding="async">
+                            <img src="${frontSrc}" class="card-front" decoding="async"${frontAttr}>
+                            <img src="${backSrc}"  class="card-back"  decoding="async"${lazyAttr}>
                         </div>`;
                     container.onclick = () => { playFlipSound(); container.classList.toggle('is-flipped'); };
+                    const mf = container.querySelector('.card-front');
+                    if (mf) mf.onerror = () => markMissingFront(container, frontSrc);
                     fragment.appendChild(container);
                 });
             } else {
                 // 📁 기존 폴더 기반 카드
                 const pattern = await detectPattern(currentCard);
+                // 뒷면이 없다고 표시된 덱은 아예 확인하지 않는다.
+                const declaredBack = currentCard.hasBack === true || currentCard.hasBack === 'true';
+                const backPattern = cardHasBack(currentCard)
+                    ? await detectBackPattern(folder, pattern, declaredBack)
+                    : 'none';
                 nums.forEach((n, index) => {
                     const container = document.createElement('div');
                     container.className = 'flip-container' + (isHorizontal ? ' horizontal' : '');
                     container.style.animationDelay = `${index * delayTime}s`;
 
-                    const frontUrl = buildFrontUrl(currentCard.folder, n, pattern);
-                    const folderEnc = encodeURIComponent(currentCard.folder);
-                    const backSpaced = `./${folderEnc}/뒷면%20(${n}).webp`;
-                    const backNormal = `./${folderEnc}/뒷면(${n}).webp`;
-                    const backPrimary  = pattern === 'spaced' ? backSpaced : backNormal;
-                    const backFallback = pattern === 'spaced' ? backNormal : backSpaced;
+                    const frontUrl = buildFrontUrl(folder, n, pattern);
 
+                    if (backPattern === 'none') {
+                        // 뒷면 없는 덱: 요청을 아예 만들지 않는다(예전엔 카드마다 404 가 나갔다).
+                        container.innerHTML = `
+                            <div class="flipper">
+                                <img src="${frontUrl}" class="card-front" decoding="async"${frontAttr}>
+                            </div>`;
+                        const only = container.querySelector('.card-front');
+                        if (only) only.onerror = () => markMissingFront(container, frontUrl);
+                        fragment.appendChild(container);
+                        return;
+                    }
+
+                    // 폴더당 1회 감지한 결과를 그대로 쓴다 — 카드마다 틀린 이름으로 먼저 찔러보지 않는다.
+                    const backUrl = buildBackUrl(currentCard.folder, n, backPattern);
                     container.innerHTML = `
                         <div class="flipper">
-                            <img src="${frontUrl}" class="card-front" decoding="async" fetchpriority="high">
-                            <img src="${backPrimary}" class="card-back" id="backImg_${n}" decoding="async"
-                                 onerror="this.onerror=null; this.src='${backFallback}';">
+                            <img src="${frontUrl}" class="card-front" decoding="async"${frontAttr}>
+                            <img src="${backUrl}" class="card-back" decoding="async"${lazyAttr}>
                         </div>`;
 
-                    const enableFlip = () => {
+                    const missFront = container.querySelector('.card-front');
+                    if (missFront) missFront.onerror = () => markMissingFront(container, frontUrl);
+
+                    const backEl = container.querySelector('.card-back');
+                    backEl.onload = () => {
+                        // 앞면이 이미 실패해 자리표시로 바뀐 카드는 되살리지 않는다.
+                        if (container.dataset.missing === '1') return;
                         container.classList.add('can-flip');
                         container.onclick = () => { playFlipSound(); container.classList.toggle('is-flipped'); };
                     };
-                    const checkPrimary = new Image();
-                    checkPrimary.onload = enableFlip;
-                    checkPrimary.onerror = () => {
-                        const checkFallback = new Image();
-                        checkFallback.onload = enableFlip;
-                        checkFallback.onerror = () => {
-                            const el = document.getElementById(`backImg_${n}`);
-                            if(el) el.style.display = 'none';
-                        };
-                        checkFallback.src = backFallback;
+                    backEl.onerror = () => {
+                        // 그 장만 뒷면이 빠진 경우. 폴더 판정을 뒤집지는 않는다.
+                        backEl.style.display = 'none';
                     };
-                    checkPrimary.src = backPrimary;
                     fragment.appendChild(container);
                 });
             }
 
+            // 그 사이 다시 뽑았다면 이 결과는 버린다(연타 시 두 벌이 쌓이던 문제).
+            if (myDraw !== _drawToken) return;
+            resultArea.innerHTML = '';
             resultArea.appendChild(fragment);
         };
     </script>

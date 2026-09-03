@@ -78,6 +78,24 @@ function isCardArray(v) {
 
 export default {
   async fetch(req, env) {
+    try {
+      return await handle(req, env);
+    } catch (e) {
+      // 예외를 잡아 응답으로 바꾸면 Cloudflare 로그에는 아무것도 남지 않는다.
+      // observability 를 켜 둔 의미가 사라지므로 여기서 직접 남긴다.
+      // (req.url 을 다시 파싱하지 않는다 — 그게 원인일 수도 있다)
+      try { console.error('[card]', req.method, req.url, (e && e.stack) || e); } catch (_) {}
+      // 어떤 경로에서 터지든 원인을 알아볼 수 있는 형태로 돌려준다.
+      return new Response(JSON.stringify({
+        error: 'internal',
+        message: '서버가 요청을 처리하지 못했습니다',
+        detail: String((e && e.message) || e).slice(0, 200)
+      }), { status: 500, headers: { ...JSON_HEADERS, 'cache-control': 'no-store' } });
+    }
+  }
+};
+
+async function handle(req, env) {
     const url = new URL(req.url);
 
     // 클라이언트에 비밀번호를 박아두지 않기 위한 판정 전용 엔드포인트.
@@ -99,6 +117,12 @@ export default {
     }
 
     if (url.pathname === '/api/cards') {
+      // KV 바인딩이 없으면 아래 모든 호출이 TypeError 로 죽는다.
+      // 설정이 잘못됐다는 걸 알아볼 수 있게 먼저 걸러낸다.
+      if (!env.CARDS || typeof env.CARDS.get !== 'function') {
+        return jsonErr('no_kv', 'KV 바인딩(CARDS)이 없습니다. wrangler.jsonc 의 kv_namespaces 를 확인하세요', 503);
+      }
+
       if (req.method === 'GET') {
         const data = (await env.CARDS.get('cards')) || '[]';
         const etag = await etagOf(data);
@@ -191,6 +215,13 @@ export default {
       return new Response('Method not allowed', { status: 405 });
     }
 
+    // ASSETS 바인딩이 없는 환경(대시보드 편집기의 미리 보기 등)에서는
+    // TypeError 대신 무슨 상황인지 알려준다. 실제 배포에는 바인딩이 있다.
+    if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') {
+      return new Response(
+        '이 환경에는 정적 자산(ASSETS) 바인딩이 없어 페이지를 낼 수 없습니다. API 는 /api/cards 와 /api/auth 로 확인하세요. 실제 배포에서는 wrangler.jsonc 의 assets.binding 으로 연결됩니다.',
+        { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } }
+      );
+    }
     return env.ASSETS.fetch(req);
-  }
-};
+}
