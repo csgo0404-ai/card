@@ -239,6 +239,7 @@
                     <div class="controls">
                         <label>찾을 장수:</label>
                         <input type="number" id="drawCount" value="1" min="1">
+                        <span id="remainInfo" style="display:none; font-size:1.1rem; color:#ffe0b2;"></span>
                         <button id="drawBtn" class="action-btn">뽑기</button>
                     </div>
                 </div>
@@ -263,7 +264,7 @@
                     <div class="table-container">
                         <table class="teacher-table">
                             <thead>
-                                <tr><th style="width:40px;">순서</th><th>표시 이름</th><th>폴더명</th><th>형태</th><th>장수</th><th style="width:60px;">보이기</th><th style="width:60px;">관리</th></tr>
+                                <tr><th style="width:40px;">순서</th><th>표시 이름</th><th>폴더명</th><th>형태</th><th>장수</th><th style="width:60px;">보이기</th><th style="width:80px;">뽑기</th><th style="width:60px;">관리</th></tr>
                             </thead>
                             <tbody id="cardManageList"></tbody>
                         </table>
@@ -483,6 +484,8 @@
         }
 
         let _sortable = null;    // 표 드래그 정렬 인스턴스(렌더마다 교체)
+        // 덱별로 '이미 뽑힌 번호'. 새로고침하면 사라진다(메모리에만 둔다).
+        const _drawnByDeck = Object.create(null);
         let _drawToken = 0;      // 진행 중인 뽑기 식별(덱 이동·연타 시 무효화)
         let cardSettings = [];   // KV 카드 (서버)
         let editingId = null;
@@ -585,7 +588,7 @@
         }
 
         function renderLobby() {
-            const visible = cardSettings.filter(c => !c.hidden);
+            const visible = cardSettings.filter(c => !isFlagOn(c.hidden));
             const totalPages = Math.max(1, Math.ceil(visible.length / LOBBY_PER_PAGE));
             if (lobbyPage >= totalPages) lobbyPage = totalPages - 1;
             const page = visible.slice(lobbyPage * LOBBY_PER_PAGE, (lobbyPage + 1) * LOBBY_PER_PAGE);
@@ -631,12 +634,13 @@
             if (!btn) { startEdit(id); return; }
             e.stopPropagation();
             if (btn.dataset.act === 'hide')  toggleCardHidden(id);
+            else if (btn.dataset.act === 'norepeat') toggleNoRepeat(id);
             else if (btn.dataset.act === 'pairs') openMirrorModal(id);
             else if (btn.dataset.act === 'del')   deleteCard(id);
         });
 
         function lobbyChangePage(dir) {
-            const visible = cardSettings.filter(c => !c.hidden);
+            const visible = cardSettings.filter(c => !isFlagOn(c.hidden));
             const totalPages = Math.ceil(visible.length / LOBBY_PER_PAGE);
             lobbyPage = Math.max(0, Math.min(totalPages - 1, lobbyPage + dir));
             renderLobby();
@@ -646,7 +650,7 @@
             // 렌더마다 Sortable 이 쌓이면 드래그 한 번에 저장이 여러 번 나간다.
             if (_sortable) { try { _sortable.destroy(); } catch (e) {} _sortable = null; }
             cardManageList.innerHTML = cardSettings.map((c) => `
-                <tr data-id="${esc(c.id)}" style="${c.hidden ? 'opacity:.5;' : ''}">
+                <tr data-id="${esc(c.id)}" style="${isFlagOn(c.hidden) ? 'opacity:.5;' : ''}">
                     <td class="drag-handle">☰</td>
                     <td>${esc(c.name)}</td>
                     <td>${esc(c.folder || '')}</td>
@@ -654,8 +658,14 @@
                     <td>${esc(c.totalImages)}장</td>
                     <td style="text-align:center;">
                         <button data-act="hide"
-                            style="background:${c.hidden ? '#6d4c41' : '#66bb6a'}; border:none; color:#fff; padding:5px 12px; border-radius:10px; cursor:pointer; font-family:'Jua',sans-serif; font-size:.85rem;">
-                            ${c.hidden ? '숨김' : '보임'}
+                            style="background:${isFlagOn(c.hidden) ? '#6d4c41' : '#66bb6a'}; border:none; color:#fff; padding:5px 12px; border-radius:10px; cursor:pointer; font-family:'Jua',sans-serif; font-size:.85rem;">
+                            ${isFlagOn(c.hidden) ? '숨김' : '보임'}
+                        </button>
+                    </td>
+                    <td style="text-align:center;">
+                        <button data-act="norepeat"
+                            style="background:${deckNoRepeat(c) ? '#5c6bc0' : '#8d6e63'}; border:none; color:#fff; padding:5px 10px; border-radius:10px; cursor:pointer; font-family:'Jua',sans-serif; font-size:.85rem;">
+                            ${deckNoRepeat(c) ? '제외' : '랜덤'}
                         </button>
                     </td>
                     <td style="white-space:nowrap;">
@@ -667,10 +677,19 @@
             _sortable = new Sortable(cardManageList, { handle: '.drag-handle', animation: 150, onEnd: saveNewOrder });
         }
 
+        // 뽑기 방식 토글. 매 뽑기가 독립이면 40장에서 3장을 뽑을 때
+        // 5번에 1번꼴로 직전 카드가 다시 나온다(실측 22%).
+        // 덱 성격에 따라 그게 괜찮기도 하고 활동을 망치기도 해서 덱마다 고르게 한다.
+        async function toggleNoRepeat(id) {
+            if (!cardSettings.some(c => c.id === id)) return;
+            const next = cardSettings.map(c => c.id === id ? { ...c, noRepeat: !deckNoRepeat(c) } : c);
+            try { await saveCards(next); } catch (e) { renderTable(); }
+        }
+
         async function toggleCardHidden(id) {
             if (!cardSettings.some(c => c.id === id)) return;
             // 원본을 먼저 고치지 않는다 — 저장이 실패해도 '유령 변경'이 남지 않게.
-            const next = cardSettings.map(c => c.id === id ? { ...c, hidden: !c.hidden } : c);
+            const next = cardSettings.map(c => c.id === id ? { ...c, hidden: !isFlagOn(c.hidden) } : c);
             try { await saveCards(next); } catch (e) { renderTable(); }
         }
 
@@ -709,7 +728,8 @@
             drawCountInput.max = deckSize(currentCard); 
             
             toggleView('drawView');
-            updatePlaceholders(); 
+            updatePlaceholders();
+            updateRemainInfo(); 
             
             // 🔥 마법: 덱을 선택하자마자 이미지를 미리 몰래 다운로드합니다!
             preloadImages(currentCard); 
@@ -863,6 +883,28 @@
 
         drawCountInput.addEventListener('input', updatePlaceholders);
 
+        // 덱별 '이미 뽑힌 번호'를 꺼낸다.
+        // 교사가 장수를 줄이면(40 → 10) 범위를 벗어난 옛 번호가 남아
+        // '남은 카드 0장' + 매 뽑기마다 재섞기 안내가 뜬다. 꺼낼 때 정리한다.
+        function drawnSetFor(card) {
+            if (!card || !card.id) return null;
+            const set = _drawnByDeck[card.id] || (_drawnByDeck[card.id] = new Set());
+            const total = deckSize(card);
+            set.forEach(n => { if (n < 1 || n > total) set.delete(n); });
+            return set;
+        }
+
+        // '제외' 덱에서만 남은 장수를 보여준다. 다 떨어지기 전에 눈치챌 수 있게.
+        function updateRemainInfo() {
+            const el = document.getElementById('remainInfo');
+            if (!el) return;
+            if (!currentCard || !deckNoRepeat(currentCard)) { el.style.display = 'none'; return; }
+            const used = (drawnSetFor(currentCard) || { size: 0 }).size;
+            const left = Math.max(0, deckSize(currentCard) - used);
+            el.style.display = '';
+            el.textContent = '남은 카드 ' + left + '장';
+        }
+
         function updatePlaceholders() {
             if(!currentCard) return;
             let count = parseInt(drawCountInput.value);
@@ -922,6 +964,8 @@
             _preloadToken++;
             clearPreload();
             resultArea.innerHTML = '';   // 뽑아 놓은 카드도 놓아준다(전체 100장이면 수백 MB)
+            const _ri = document.getElementById('remainInfo');
+            if (_ri) _ri.style.display = 'none';
             toggleView('studentLobby'); mainTitle.textContent = "생각 책방"; resetForm();
         };
 
@@ -988,9 +1032,13 @@
         document.getElementById('exportBtn').onclick = () => {
             const blob = new Blob([JSON.stringify(cardSettings, null, 2)], { type: 'application/json' });
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
+            const url = URL.createObjectURL(blob);
+            a.href = url;
             a.download = '카드설정_' + new Date().toISOString().slice(0,10) + '.json';
             a.click();
+            // 놓아주지 않으면 내보낼 때마다 blob 이 쌓여 탭을 닫을 때까지 남는다.
+            // 다운로드가 시작된 뒤에 풀어야 해서 한 박자 미룬다.
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         };
 
         document.getElementById('importBtn').onclick = () => document.getElementById('importFile').click();
@@ -1017,6 +1065,9 @@
 
                         const out = { ...c, id, order: typeof c.order === 'number' ? c.order : i };
                         out.folder = deckFolder(c);
+                        // 문자열 'false' 가 그대로 저장되면 숨김/제외가 반대로 걸린다.
+                        if ('hidden'   in c) out.hidden   = isFlagOn(c.hidden);
+                        if ('noRepeat' in c) out.noRepeat = isFlagOn(c.noRepeat);
 
                         if (Array.isArray(c.customPairs)) {
                             // 짝이 문자열이 아니면 뽑기에서 startsWith 로 죽는다. 여기서 걸러낸다.
@@ -1061,12 +1112,12 @@
             e.target.value = '';
         };
 
-        window.deleteCard = async (id) => {
+        async function deleteCard(id) {
             if(!confirm("삭제할까요?")) return;
             const next = cardSettings.filter(c => c.id !== id);
             if (next.length === cardSettings.length) return;
             try { await saveCards(next); } catch (e) {}
-        };
+        }
 
         // 🪞 거울카드: preload 스킵
         const _origPreload = preloadImages;
@@ -1233,6 +1284,17 @@
             return p && typeof p.front === 'string' && typeof p.back === 'string';
         }
 
+        // 서버 데이터가 불리언이 아니라 문자열('false')로 들어올 수 있다.
+        // cardHasBack 과 같은 규칙으로 읽는다.
+        // 켜짐/꺼짐 플래그. 서버 데이터는 불리언이 아니라 문자열일 수 있고
+        // "false" 는 참인 문자열이라 그냥 쓰면 반대로 동작한다(hasBack 이 실제로 문자열이다).
+        function isFlagOn(v) {
+            return v === true || v === 'true';
+        }
+        function deckNoRepeat(card) {
+            return isFlagOn(card && card.noRepeat);
+        }
+
         function needsFolder(card) {
             if (!card) return false;
             if (!Array.isArray(card.customPairs)) return true;
@@ -1300,13 +1362,33 @@
             initAudio();
             playSimultaneousDrawSound();
 
-            let nums = Array.from({length: total}, (_, i) => i + 1);
+            // '뽑은 것 제외' 덱이면 이미 나온 번호를 후보에서 뺀다.
+            const noRepeat = deckNoRepeat(currentCard);
+            let drawnSet = null;
+            if (noRepeat) {
+                drawnSet = drawnSetFor(currentCard);
+                // 남은 게 요청한 장수보다 적으면 한 바퀴 돈 것으로 보고 다시 섞는다.
+                // (남은 몇 장만 주면 '요청한 만큼 안 나온다'가 되어 더 헷갈린다)
+                if (total - drawnSet.size < count) {
+                    // 덱을 통째로 뽑는 경우('전체')는 애초에 한 바퀴를 새로 도는 것이라
+                    // "모두 사용했다"는 안내가 사실과 다르다. 조용히 새로 섞는다.
+                    const wholeDeck = count >= total;
+                    drawnSet.clear();
+                    if (!wholeDeck) alert('카드를 모두 사용해서 다시 섞었어요.');
+                }
+            }
+
+            let nums = [];
+            for (let i = 1; i <= total; i++) {
+                if (!noRepeat || !drawnSet.has(i)) nums.push(i);
+            }
             for (let i = nums.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [nums[i], nums[j]] = [nums[j], nums[i]];
             }
-            if(count > total) count = total;
+            if(count > nums.length) count = nums.length;
             nums = nums.slice(0, count);
+            if (noRepeat) nums.forEach(n => drawnSet.add(n));
 
             resultArea.innerHTML = '';
             const fragment = document.createDocumentFragment();
@@ -1393,6 +1475,7 @@
             if (myDraw !== _drawToken) return;
             resultArea.innerHTML = '';
             resultArea.appendChild(fragment);
+            updateRemainInfo();
         };
     </script>
 </body>
