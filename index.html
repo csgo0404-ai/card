@@ -206,9 +206,30 @@
         .mirror-btn-primary { background:#8d6e63; color:#fff; border:none; padding:12px 28px; border-radius:20px; font-size:1.1rem; font-family:'Jua',sans-serif; cursor:pointer; box-shadow:0 4px 0 #5d4037; }
         .mirror-btn-primary:active { transform:translateY(4px); box-shadow:none; }
         .mirror-btn-cancel  { background:#4e342e; color:#bcaaa4; border:none; padding:12px 22px; border-radius:20px; font-size:1.1rem; font-family:'Jua',sans-serif; cursor:pointer; }
+
+        /* 카드를 모두 사용해 다시 섞었을 때 뜨는 안내. alert()는 뽑기 흐름을 막고
+           딱딱해서, 자동으로 사라지는 배지로 바꿨다. */
+        #reshuffleToast {
+            position:fixed; left:50%; top:26px; transform:translateX(-50%) translateY(-20px);
+            background:linear-gradient(135deg,#8d6e63,#6d4c41); color:#fff3e0;
+            font-family:'Jua',sans-serif; font-size:1.15rem; line-height:1.4;
+            padding:14px 28px; border-radius:30px; box-shadow:0 8px 20px rgba(0,0,0,.35);
+            display:flex; align-items:center; gap:10px; z-index:9999;
+            opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease;
+        }
+        #reshuffleToast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+        #reshuffleToast .toast-emoji { font-size:1.4rem; }
+
+        /* 카드 관리 표 일괄 선택 */
+        #bulkModeBar { display:none; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+        #bulkModeBar.active { display:flex; }
+        #bulkModeBar button { font-family:'Jua',sans-serif; border:none; border-radius:14px; padding:7px 14px; font-size:.9rem; cursor:pointer; color:#fff; }
+        .bulk-select-col { width:34px; text-align:center; }
+        .bulk-select-col input[type=checkbox] { width:18px; height:18px; cursor:pointer; }
     </style>
 </head>
 <body>
+    <div id="reshuffleToast"><span class="toast-emoji">🔄</span><span id="reshuffleToastText"></span></div>
     <div class="app-container">
         <header>
             <button id="backBtn" class="icon-btn hidden">◀ 서재로</button>
@@ -239,7 +260,6 @@
                     <div class="controls">
                         <label>찾을 장수:</label>
                         <input type="number" id="drawCount" value="1" min="1">
-                        <span id="remainInfo" style="display:none; font-size:1.1rem; color:#ffe0b2;"></span>
                         <button id="drawBtn" class="action-btn">뽑기</button>
                     </div>
                 </div>
@@ -260,11 +280,21 @@
                             <input type="number" id="newCardTotal" placeholder="장수">
                             <button id="addCardBtn" class="action-btn" style="font-size:1rem; padding:10px 20px;">저장</button>
                             <button id="cancelEditBtn" class="icon-btn hidden" style="background:#666;">취소</button>
+                            <button id="bulkModeToggleBtn" class="action-btn" style="font-size:1rem; padding:10px 20px; background:#5c6bc0; margin-left:auto;">☑ 여러 개 선택</button>
                         </div>
+                    <div id="bulkModeBar">
+                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                            <input type="checkbox" id="bulkSelectAll" style="width:18px; height:18px; cursor:pointer;"> 전체선택
+                        </label>
+                        <span id="bulkSelectedCount" style="opacity:.8;">0개 선택됨</span>
+                        <button id="bulkSetRandomBtn" style="background:#8d6e63;">선택 카드 랜덤으로</button>
+                        <button id="bulkSetNoRepeatBtn" style="background:#5c6bc0;">선택 카드 제외(안 겹침)로</button>
+                        <button id="bulkModeCloseBtn" style="background:#4e342e;">닫기</button>
+                    </div>
                     <div class="table-container">
                         <table class="teacher-table">
                             <thead>
-                                <tr><th style="width:40px;">순서</th><th>표시 이름</th><th>폴더명</th><th>형태</th><th>장수</th><th style="width:60px;">보이기</th><th style="width:80px;">뽑기</th><th style="width:60px;">관리</th></tr>
+                                <tr><th class="bulk-select-col" id="bulkSelectHeadCol" style="display:none;"></th><th style="width:40px;">순서</th><th>표시 이름</th><th>폴더명</th><th>형태</th><th>장수</th><th style="width:60px;">보이기</th><th style="width:80px;">뽑기</th><th style="width:60px;">관리</th></tr>
                             </thead>
                             <tbody id="cardManageList"></tbody>
                         </table>
@@ -500,6 +530,10 @@
         let lobbyPage = 0;
         const LOBBY_PER_PAGE = 10;
 
+        // 카드 관리표 일괄 선택(랜덤/제외 한 번에 바꾸기)
+        let _bulkMode = false;
+        let _bulkSelected = new Set();
+
         // (옛 base64 거울카드용 IndexedDB 계층은 제거했다 —
         //  지금 거울카드는 파일명만 저장하며, 이 계층은 한 번도 실행되지 않았다)
 
@@ -636,13 +670,28 @@
             const tr = e.target.closest('tr');
             if (!tr || !tr.dataset.id) return;
             const id = tr.dataset.id;
+            // 일괄 선택 체크박스 클릭은 편집 화면으로 넘어가면 안 된다.
+            if (e.target.closest('input[data-act="bulkSelect"]')) { e.stopPropagation(); return; }
             const btn = e.target.closest('button[data-act]');
-            if (!btn) { startEdit(id); return; }
+            if (!btn) {
+                if (_bulkMode) return;   // 일괄 선택 중엔 행 클릭으로 편집에 들어가지 않게
+                startEdit(id);
+                return;
+            }
             e.stopPropagation();
             if (btn.dataset.act === 'hide')  toggleCardHidden(id);
             else if (btn.dataset.act === 'norepeat') toggleNoRepeat(id);
             else if (btn.dataset.act === 'pairs') openMirrorModal(id);
             else if (btn.dataset.act === 'del')   deleteCard(id);
+        });
+        cardManageList.addEventListener('change', e => {
+            const cb = e.target.closest('input[data-act="bulkSelect"]');
+            if (!cb) return;
+            const tr = cb.closest('tr');
+            if (!tr || !tr.dataset.id) return;
+            if (cb.checked) _bulkSelected.add(tr.dataset.id);
+            else _bulkSelected.delete(tr.dataset.id);
+            updateBulkSelectedCount();
         });
 
         function lobbyChangePage(dir) {
@@ -655,8 +704,14 @@
         function renderTable() {
             // 렌더마다 Sortable 이 쌓이면 드래그 한 번에 저장이 여러 번 나간다.
             if (_sortable) { try { _sortable.destroy(); } catch (e) {} _sortable = null; }
+            // 그 사이 지워진 카드의 선택은 버린다(카운트가 실제보다 많게 보이지 않도록).
+            const liveIds = new Set(cardSettings.map(c => c.id));
+            _bulkSelected.forEach(id => { if (!liveIds.has(id)) _bulkSelected.delete(id); });
             cardManageList.innerHTML = cardSettings.map((c) => `
                 <tr data-id="${esc(c.id)}" style="${isFlagOn(c.hidden) ? 'opacity:.5;' : ''}">
+                    <td class="bulk-select-col" style="${_bulkMode ? '' : 'display:none;'}">
+                        <input type="checkbox" data-act="bulkSelect" ${_bulkSelected.has(c.id) ? 'checked' : ''}>
+                    </td>
                     <td class="drag-handle">☰</td>
                     <td>${esc(c.name)}</td>
                     <td>${esc(c.folder || '')}</td>
@@ -681,6 +736,14 @@
                 </tr>
             `).join('');
             _sortable = new Sortable(cardManageList, { handle: '.drag-handle', animation: 150, onEnd: saveNewOrder });
+            updateBulkSelectedCount();
+        }
+
+        function updateBulkSelectedCount() {
+            const el = document.getElementById('bulkSelectedCount');
+            if (el) el.textContent = _bulkSelected.size + '개 선택됨';
+            const all = document.getElementById('bulkSelectAll');
+            if (all) all.checked = cardSettings.length > 0 && _bulkSelected.size === cardSettings.length;
         }
 
         // 뽑기 방식 토글. 매 뽑기가 독립이면 40장에서 3장을 뽑을 때
@@ -696,6 +759,23 @@
             if (!cardSettings.some(c => c.id === id)) return;
             // 원본을 먼저 고치지 않는다 — 저장이 실패해도 '유령 변경'이 남지 않게.
             const next = cardSettings.map(c => c.id === id ? { ...c, hidden: !isFlagOn(c.hidden) } : c);
+            try { await saveCards(next); } catch (e) { renderTable(); }
+        }
+
+        function setBulkMode(on) {
+            _bulkMode = on;
+            if (!on) _bulkSelected.clear();
+            document.getElementById('bulkModeBar').classList.toggle('active', on);
+            const headCol = document.getElementById('bulkSelectHeadCol');
+            if (headCol) headCol.style.display = on ? '' : 'none';
+            document.getElementById('bulkModeToggleBtn').textContent = on ? '☑ 선택 모드 끄기' : '☑ 여러 개 선택';
+            renderTable();
+        }
+
+        // 선택한 카드들의 뽑기 방식(랜덤/제외)을 한 번에 바꾼다.
+        async function bulkSetNoRepeat(noRepeat) {
+            if (_bulkSelected.size === 0) { alert('먼저 카드를 선택해 주세요.'); return; }
+            const next = cardSettings.map(c => _bulkSelected.has(c.id) ? { ...c, noRepeat } : c);
             try { await saveCards(next); } catch (e) { renderTable(); }
         }
 
@@ -735,8 +815,7 @@
             
             toggleView('drawView');
             updatePlaceholders();
-            updateRemainInfo(); 
-            
+
             // 🔥 마법: 덱을 선택하자마자 이미지를 미리 몰래 다운로드합니다!
             preloadImages(currentCard); 
         }
@@ -889,6 +968,19 @@
 
         drawCountInput.addEventListener('input', updatePlaceholders);
 
+        // alert() 대신 잠깐 떴다 사라지는 안내. 연달아 뽑으면 이전 타이머가
+        // 화면 중간에 끄지 않도록 타이머를 매번 새로 잡는다.
+        let _reshuffleToastTimer = null;
+        function showReshuffleToast(msg) {
+            const el = document.getElementById('reshuffleToast');
+            const txt = document.getElementById('reshuffleToastText');
+            if (!el || !txt) return;
+            txt.textContent = msg;
+            el.classList.add('show');
+            clearTimeout(_reshuffleToastTimer);
+            _reshuffleToastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+        }
+
         // 덱별 '이미 뽑힌 번호'를 꺼낸다.
         // 교사가 장수를 줄이면(40 → 10) 범위를 벗어난 옛 번호가 남아
         // '남은 카드 0장' + 매 뽑기마다 재섞기 안내가 뜬다. 꺼낼 때 정리한다.
@@ -900,16 +992,6 @@
             return set;
         }
 
-        // '제외' 덱에서만 남은 장수를 보여준다. 다 떨어지기 전에 눈치챌 수 있게.
-        function updateRemainInfo() {
-            const el = document.getElementById('remainInfo');
-            if (!el) return;
-            if (!currentCard || !deckNoRepeat(currentCard)) { el.style.display = 'none'; return; }
-            const used = (drawnSetFor(currentCard) || { size: 0 }).size;
-            const left = Math.max(0, deckSize(currentCard) - used);
-            el.style.display = '';
-            el.textContent = '남은 카드 ' + left + '장';
-        }
 
         function updatePlaceholders() {
             if(!currentCard) return;
@@ -970,10 +1052,19 @@
             _preloadToken++;
             clearPreload();
             resultArea.innerHTML = '';   // 뽑아 놓은 카드도 놓아준다(전체 100장이면 수백 MB)
-            const _ri = document.getElementById('remainInfo');
-            if (_ri) _ri.style.display = 'none';
+            setBulkMode(false);   // 교사가 로비로 나가면 선택 모드도 정리
             toggleView('studentLobby'); mainTitle.textContent = "생각 책방"; resetForm();
         };
+
+        document.getElementById('bulkModeToggleBtn').onclick = () => setBulkMode(!_bulkMode);
+        document.getElementById('bulkModeCloseBtn').onclick = () => setBulkMode(false);
+        document.getElementById('bulkSelectAll').onchange = (e) => {
+            if (e.target.checked) cardSettings.forEach(c => _bulkSelected.add(c.id));
+            else _bulkSelected.clear();
+            renderTable();
+        };
+        document.getElementById('bulkSetRandomBtn').onclick = () => bulkSetNoRepeat(false);
+        document.getElementById('bulkSetNoRepeatBtn').onclick = () => bulkSetNoRepeat(true);
 
         document.getElementById('addCardBtn').onclick = async () => {
             const name = document.getElementById('newCardName').value.trim();
@@ -1380,7 +1471,7 @@
                     // "모두 사용했다"는 안내가 사실과 다르다. 조용히 새로 섞는다.
                     const wholeDeck = count >= total;
                     drawnSet.clear();
-                    if (!wholeDeck) alert('카드를 모두 사용해서 다시 섞었어요.');
+                    if (!wholeDeck) showReshuffleToast('카드를 모두 사용해서 다시 섞었어요!');
                 }
             }
 
@@ -1481,7 +1572,6 @@
             if (myDraw !== _drawToken) return;
             resultArea.innerHTML = '';
             resultArea.appendChild(fragment);
-            updateRemainInfo();
         };
     </script>
 </body>
