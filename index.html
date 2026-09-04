@@ -207,18 +207,36 @@
         .mirror-btn-primary:active { transform:translateY(4px); box-shadow:none; }
         .mirror-btn-cancel  { background:#4e342e; color:#bcaaa4; border:none; padding:12px 22px; border-radius:20px; font-size:1.1rem; font-family:'Jua',sans-serif; cursor:pointer; }
 
-        /* 카드를 모두 사용해 다시 섞었을 때 뜨는 안내. alert()는 뽑기 흐름을 막고
-           딱딱해서, 자동으로 사라지는 배지로 바꿨다. */
-        #reshuffleToast {
-            position:fixed; left:50%; top:26px; transform:translateX(-50%) translateY(-20px);
-            background:linear-gradient(135deg,#8d6e63,#6d4c41); color:#fff3e0;
-            font-family:'Jua',sans-serif; font-size:1.15rem; line-height:1.4;
-            padding:14px 28px; border-radius:30px; box-shadow:0 8px 20px rgba(0,0,0,.35);
-            display:flex; align-items:center; gap:10px; z-index:9999;
-            opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease;
+        /* 카드를 모두 사용해 다시 섞었을 때 뜨는 안내. alert()는 뽑기 흐름을 딱딱하게
+           끊어서, 예쁜 팝업 카드로 바꿨다(확인 버튼을 눌러야 닫힌다). */
+        #reshuffleModal {
+            display:none; position:fixed; inset:0; background:rgba(62,39,35,.6);
+            z-index:9999; align-items:center; justify-content:center; padding:20px;
         }
-        #reshuffleToast.show { opacity:1; transform:translateX(-50%) translateY(0); }
-        #reshuffleToast .toast-emoji { font-size:1.4rem; }
+        #reshuffleModal.show { display:flex; }
+        .reshuffle-card {
+            width:100%; max-width:380px; background:var(--bg-cream); border-radius:26px;
+            overflow:hidden; box-shadow:0 20px 50px rgba(0,0,0,.4);
+            animation: reshuffleCardPop .35s cubic-bezier(.34,1.56,.64,1);
+        }
+        @keyframes reshuffleCardPop {
+            0% { opacity:0; transform:scale(.7) translateY(20px); }
+            100% { opacity:1; transform:scale(1) translateY(0); }
+        }
+        .reshuffle-card-head {
+            background:linear-gradient(135deg,var(--wood-bg),var(--wood-dark));
+            padding:26px 20px 20px; text-align:center; color:#fff3e0;
+        }
+        .reshuffle-card-emoji { font-size:2.6rem; line-height:1; }
+        .reshuffle-card-title { font-family:'Jua',sans-serif; font-size:1.35rem; margin-top:8px; }
+        .reshuffle-card-body { padding:22px 24px 26px; text-align:center; }
+        .reshuffle-card-msg { font-family:'Jua',sans-serif; font-size:1.05rem; color:var(--wood-dark); line-height:1.5; }
+        .reshuffle-card-btn {
+            margin-top:20px; width:100%; background:linear-gradient(135deg,#8d6e63,#6d4c41); color:#fff;
+            border:none; padding:14px; border-radius:18px; font-family:'Jua',sans-serif; font-size:1.1rem;
+            cursor:pointer; box-shadow:0 4px 0 #4e342e; transition:.15s;
+        }
+        .reshuffle-card-btn:active { transform:translateY(4px); box-shadow:none; }
 
         /* 카드 관리 표 일괄 선택 */
         #bulkModeBar { display:none; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
@@ -229,7 +247,18 @@
     </style>
 </head>
 <body>
-    <div id="reshuffleToast"><span class="toast-emoji">🔄</span><span id="reshuffleToastText"></span></div>
+    <div id="reshuffleModal">
+        <div class="reshuffle-card">
+            <div class="reshuffle-card-head">
+                <div class="reshuffle-card-emoji">🔀</div>
+                <div class="reshuffle-card-title">카드를 다 뽑았어요!</div>
+            </div>
+            <div class="reshuffle-card-body">
+                <div class="reshuffle-card-msg" id="reshuffleModalText"></div>
+                <button id="reshuffleModalOkBtn" class="reshuffle-card-btn">확인했어요 ✨</button>
+            </div>
+        </div>
+    </div>
     <div class="app-container">
         <header>
             <button id="backBtn" class="icon-btn hidden">◀ 서재로</button>
@@ -968,18 +997,19 @@
 
         drawCountInput.addEventListener('input', updatePlaceholders);
 
-        // alert() 대신 잠깐 떴다 사라지는 안내. 연달아 뽑으면 이전 타이머가
-        // 화면 중간에 끄지 않도록 타이머를 매번 새로 잡는다.
-        let _reshuffleToastTimer = null;
+        // alert() 대신 뜨는 예쁜 팝업. 확인 버튼을 눌러야 닫혀서
+        // (자동으로 사라지는 배지와 달리) 학생이 안내를 놓치지 않는다.
         function showReshuffleToast(msg) {
-            const el = document.getElementById('reshuffleToast');
-            const txt = document.getElementById('reshuffleToastText');
-            if (!el || !txt) return;
+            const modal = document.getElementById('reshuffleModal');
+            const txt = document.getElementById('reshuffleModalText');
+            if (!modal || !txt) return;
             txt.textContent = msg;
-            el.classList.add('show');
-            clearTimeout(_reshuffleToastTimer);
-            _reshuffleToastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+            modal.classList.add('show');
         }
+        function hideReshuffleModal() {
+            document.getElementById('reshuffleModal').classList.remove('show');
+        }
+        document.getElementById('reshuffleModalOkBtn').onclick = hideReshuffleModal;
 
         // 덱별 '이미 뽑힌 번호'를 꺼낸다.
         // 교사가 장수를 줄이면(40 → 10) 범위를 벗어난 옛 번호가 남아
@@ -1053,6 +1083,7 @@
             clearPreload();
             resultArea.innerHTML = '';   // 뽑아 놓은 카드도 놓아준다(전체 100장이면 수백 MB)
             setBulkMode(false);   // 교사가 로비로 나가면 선택 모드도 정리
+            hideReshuffleModal();   // 확인을 안 누르고 나가도 팝업이 로비 위에 남지 않게
             toggleView('studentLobby'); mainTitle.textContent = "생각 책방"; resetForm();
         };
 
