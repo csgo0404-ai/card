@@ -31,7 +31,8 @@
         body.fonts-loaded { opacity: 1; } /* 폰트 로딩 완료 시 나타남 */
         
         /* 🌟 창 크기를 5열(300px 카드 5장)에 맞춰 대폭 확대 */
-        .app-container { background-color: var(--bg-cream); border-radius: 25px; border: 10px solid var(--wood-dark); box-shadow: 0 20px 40px rgba(0,0,0,0.4); width: 100%; max-width: 1750px; padding: 35px; position: relative; }
+        /* 뷰포트에 딱 맞춰 살짝 줄여 세로 스크롤바가 안 생기게 한다. */
+        .app-container { background-color: var(--bg-cream); border-radius: 25px; border: 10px solid var(--wood-dark); box-shadow: 0 20px 40px rgba(0,0,0,0.4); width: 100%; max-width: 1750px; padding: 35px; position: relative; transform: scale(0.95); transform-origin: center; }
         
         header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 4px solid var(--wood-dark); padding-bottom: 15px; }
         
@@ -227,7 +228,6 @@
             background:linear-gradient(135deg,var(--wood-bg),var(--wood-dark));
             padding:26px 20px 20px; text-align:center; color:#fff3e0;
         }
-        .reshuffle-card-emoji { font-size:2.6rem; line-height:1; }
         .reshuffle-card-title { font-family:'Jua',sans-serif; font-size:1.35rem; margin-top:8px; }
         .reshuffle-card-body { padding:22px 24px 26px; text-align:center; }
         .reshuffle-card-msg { font-family:'Jua',sans-serif; font-size:1.05rem; color:var(--wood-dark); line-height:1.5; }
@@ -250,7 +250,6 @@
     <div id="reshuffleModal">
         <div class="reshuffle-card">
             <div class="reshuffle-card-head">
-                <div class="reshuffle-card-emoji">🔀</div>
                 <div class="reshuffle-card-title">카드를 다 뽑았어요!</div>
             </div>
             <div class="reshuffle-card-body">
@@ -549,8 +548,31 @@
         }
 
         let _sortable = null;    // 표 드래그 정렬 인스턴스(렌더마다 교체)
-        // 덱별로 '이미 뽑힌 번호'. 새로고침하면 사라진다(메모리에만 둔다).
+        // 덱별로 '이미 뽑힌 번호'. '제외(안 겹침)' 덱에서 새로고침해도 같은 카드가
+        // 다시 나오지 않도록 localStorage 에도 남긴다(숫자만 저장해 용량은 무시할 만큼 작다).
         const _drawnByDeck = Object.create(null);
+        const DRAWN_HISTORY_KEY = 'cookieClassCardsDrawnHistory';
+        function loadDrawnHistory() {
+            try {
+                const raw = localStorage.getItem(DRAWN_HISTORY_KEY);
+                if (!raw) return;
+                const obj = JSON.parse(raw);
+                if (!obj || typeof obj !== 'object') return;
+                Object.keys(obj).forEach(id => {
+                    if (Array.isArray(obj[id])) _drawnByDeck[id] = new Set(obj[id]);
+                });
+            } catch (e) { console.warn('뽑기 기록 불러오기 실패', e); }
+        }
+        function saveDrawnHistory() {
+            try {
+                const obj = {};
+                Object.keys(_drawnByDeck).forEach(id => {
+                    if (_drawnByDeck[id].size) obj[id] = [..._drawnByDeck[id]];
+                });
+                localStorage.setItem(DRAWN_HISTORY_KEY, JSON.stringify(obj));
+            } catch (e) { console.warn('뽑기 기록 저장 실패(무시하고 계속 진행)', e); }
+        }
+        loadDrawnHistory();
         let _drawToken = 0;      // 진행 중인 뽑기 식별(덱 이동·연타 시 무효화)
         let cardSettings = [];   // KV 카드 (서버)
         let editingId = null;
@@ -1244,7 +1266,11 @@
             if(!confirm("삭제할까요?")) return;
             const next = cardSettings.filter(c => c.id !== id);
             if (next.length === cardSettings.length) return;
-            try { await saveCards(next); } catch (e) {}
+            try {
+                await saveCards(next);
+                // 지운 카드의 뽑기 기록도 같이 치운다(안 그러면 로컬에 고아로 남는다).
+                if (_drawnByDeck[id]) { delete _drawnByDeck[id]; saveDrawnHistory(); }
+            } catch (e) {}
         }
 
         // 🪞 거울카드: preload 스킵
@@ -1516,7 +1542,7 @@
             }
             if(count > nums.length) count = nums.length;
             nums = nums.slice(0, count);
-            if (noRepeat) nums.forEach(n => drawnSet.add(n));
+            if (noRepeat) { nums.forEach(n => drawnSet.add(n)); saveDrawnHistory(); }
 
             resultArea.innerHTML = '';
             const fragment = document.createDocumentFragment();
