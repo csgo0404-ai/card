@@ -351,13 +351,20 @@
         // "내가 본 것 위에만 쓴다"를 서버가 확인하게 한다(옛 워커는 이 헤더를 무시하므로 안전).
         let _serverEtag = '';
 
+        // Cloudflare 가 본문을 압축하면 강한 ETag \"abc\" 를 약한 W/\"abc\" 로 바꿔 내려준다.
+        // 그대로 If-Match 로 되돌려 보내면 워커의 강한 태그와 영원히 불일치해
+        // 저장할 때마다 '다른 기기에서 먼저 저장했어요' 가 떴다. 접두사를 떼고 쓴다.
+        function normEtag(v) {
+            return typeof v === 'string' ? v.replace(/^\s*W\//i, '').trim() : '';
+        }
+
         // 실패를 빈 배열로 둔갑시키지 않는다. 반드시 throw 해서 호출부가 캐시를 지키게 한다.
         async function fetchCards() {
             const r = await fetch(API);
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const j = await r.json();
             if (!isCardArray(j)) throw new Error('응답 형식 오류');
-            const etag = r.headers && r.headers.get ? (r.headers.get('etag') || '') : '';
+            const etag = normEtag(r.headers && r.headers.get ? r.headers.get('etag') : '');
             return { list: j, etag };
         }
         async function saveCards(arr) {
@@ -427,8 +434,7 @@
                 throw new Error('save failed');
             }
             // 저장 응답의 지문으로 갱신해 두면, 연달아 저장할 때 다시 읽지 않아도 된다.
-            const newEtag = r.headers && r.headers.get ? r.headers.get('etag') : null;
-            _serverEtag = newEtag || '';
+            _serverEtag = normEtag(r.headers && r.headers.get ? r.headers.get('etag') : '');
             // 저장 성공 시에만 메모리/캐시에 반영한다(실패 시 롤백 불필요).
             cardSettings = arr;
             try {
